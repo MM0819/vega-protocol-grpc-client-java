@@ -21,4 +21,19 @@ public class VegaGrpcClientTest {
         List<Markets.Market> markets = vegaGrpcClient.getMarkets();
         Assertions.assertEquals(13, markets.size());
     }
+
+    @Test
+    public void testStreamAccounts() {
+        vegaGrpcClient.streamAccounts((accounts) -> Assertions.assertTrue(accounts.size() > 0));
+    }
+
+    @Test
+    public void testStreamPositions() {
+        vegaGrpcClient.streamPositions((positions) -> Assertions.assertTrue(positions.size() > 0));
+    }
+
+    @Test
+    public void testStreamTrades() {
+        vegaGrpcClient.streamTrades((trades) -> Assertions.assertTrue(trades.size() > 0));
+    }
 }
