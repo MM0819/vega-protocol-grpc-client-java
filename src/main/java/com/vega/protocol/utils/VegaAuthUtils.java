@@ -30,11 +30,11 @@ public class VegaAuthUtils {
      * @param powHashFunction proof-of-work hash function
      * @param inputData {@link vega.commands.v1.TransactionOuterClass.InputData}
      *
-     * @return tx in base64 format
+     * @return {@link TransactionOuterClass.Transaction}
      *
      * @throws Exception thrown if exception occurs while building and signing tx
      */
-    public static String buildTx(
+    public static TransactionOuterClass.Transaction buildTx(
             final String publicKey,
             final String privateKey,
             final String chainId,
@@ -59,13 +59,12 @@ public class VegaAuthUtils {
         TransactionOuterClass.ProofOfWork proofOfWork = TransactionOuterClass.ProofOfWork.newBuilder()
                 .setTid(txId)
                 .setNonce(nonce).build();
-        TransactionOuterClass.Transaction tx = TransactionOuterClass.Transaction.newBuilder()
+        return TransactionOuterClass.Transaction.newBuilder()
                 .setSignature(signature)
                 .setPubKey(publicKey)
                 .setPow(proofOfWork)
                 .setInputData(ByteString.copyFrom(inputDataPacked))
                 .build();
-        return Base64.getEncoder().encodeToString(tx.toByteArray());
     }
 
     /**
@@ -116,6 +115,7 @@ public class VegaAuthUtils {
      * @return number of leading zeroes
      */
     private static int lz(int num) {
+        if(num == 0) return 8;
         int lz = 0;
         while ((num & (1 << 7)) == 0) {
             num = (num << 1);

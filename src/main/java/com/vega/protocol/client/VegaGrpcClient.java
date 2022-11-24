@@ -7,6 +7,7 @@ import datanode.api.v2.TradingDataServiceGrpc;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang3.StringUtils;
 import vega.Assets;
 import vega.Markets;
@@ -26,7 +27,7 @@ import java.util.stream.Collectors;
 public class VegaGrpcClient {
 
     private static final String DEFAULT_HOSTNAME = "api.n10.testnet.vega.xyz";
-    private static final int DEFAULT_PORT = 3007;
+    private static final int DEFAULT_PORT = 3002;
 
     private final String privateKey;
     private final String publicKey;
@@ -105,10 +106,15 @@ public class VegaGrpcClient {
             final TransactionOuterClass.InputData inputData
     ) {
         try {
-            String encodedTx = VegaAuthUtils.buildTx(publicKey, privateKey,
+            var tx = VegaAuthUtils.buildTx(publicKey, privateKey,
                     lastBlock.getChainId(), lastBlock.getSpamPowDifficulty(),
                     lastBlock.getHash(), lastBlock.getSpamPowHashFunction(), inputData);
-            log.info(encodedTx);
+            log.info(Base64.encodeBase64String(tx.toByteArray()));
+            Core.CheckTransactionRequest checkTx = Core.CheckTransactionRequest.newBuilder()
+                    .setTx(tx)
+                    .build();
+            var response = getCoreClient().checkTransaction(checkTx);
+            log.info(response.toString());
             // TODO - send tx
         } catch(Exception e) {
             log.error(e.getMessage(), e);
