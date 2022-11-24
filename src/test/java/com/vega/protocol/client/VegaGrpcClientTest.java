@@ -3,6 +3,7 @@ package com.vega.protocol.client;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import vega.Governance;
 import vega.Markets;
 import vega.Vega;
 
@@ -10,14 +11,13 @@ import java.util.List;
 
 public class VegaGrpcClientTest {
 
-    private final static String PRIVATE_KEY = "59dfdcad33e8a1487a4ac4fa5ec53d903b28857d97db5cd30cc8adc0da119bae090062f920485250e5edf498d3ae030a6ab64386a29ab8f874f96049eb493471";
-    private final static String PUBLIC_KEY = "090062f920485250e5edf498d3ae030a6ab64386a29ab8f874f96049eb493471";
+    private final static String PRIVATE_KEY = "e70da3716e54cfe4cbed58b584b85095bb4a8257a4b39ec91b491f29526430b6053a10c3e8aa92bcfae80b61845a23a4dfc88d94a31570e3c494da9f43b64ca0";
 
     private VegaGrpcClient vegaGrpcClient;
 
     @BeforeEach
     public void setup() {
-        vegaGrpcClient = new VegaGrpcClient(PRIVATE_KEY, PUBLIC_KEY);
+        vegaGrpcClient = new VegaGrpcClient(PRIVATE_KEY);
     }
 
     @Test
@@ -43,8 +43,14 @@ public class VegaGrpcClientTest {
 
     @Test
     public void testSubmitOrder() {
-        String marketId = "12345";
+        String marketId = "90e71c52b2f40db78efc24abe4217382993868cd24e45b3dd17147be4afaf884";
         vegaGrpcClient.submitOrder("1000", 100L, Vega.Side.SIDE_BUY, Vega
                 .Order.TimeInForce.TIME_IN_FORCE_GTC, Vega.Order.Type.TYPE_LIMIT, marketId);
+    }
+
+    @Test
+    public void testVoteOnProposal() {
+        String proposalId = "7e2847d30ef2d4858f0f098c4251c789ad63ac9644e610ddb1cb014334a01ca6";
+        vegaGrpcClient.voteOnProposal(proposalId, Governance.Vote.Value.VALUE_NO);
     }
 }

@@ -7,9 +7,12 @@ import datanode.api.v2.TradingDataServiceGrpc;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.lang3.StringUtils;
+import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters;
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
 import vega.Assets;
+import vega.Governance;
 import vega.Markets;
 import vega.Vega;
 import vega.api.v1.Core;
@@ -30,15 +33,12 @@ public class VegaGrpcClient {
     private static final int DEFAULT_PORT = 3002;
 
     private final String privateKey;
-    private final String publicKey;
 
-    // TODO - in future the user should be able to pass a wallet object that contains multiple public keys
+    // TODO - allow user to pass Wallet object containing multiple keys
     public VegaGrpcClient(
-            final String privateKey,
-            final String publicKey
+            final String privateKey
     ) {
         this.privateKey = privateKey;
-        this.publicKey = publicKey;
     }
 
     /**
@@ -106,34 +106,47 @@ public class VegaGrpcClient {
             final TransactionOuterClass.InputData inputData
     ) {
         try {
+            String chainId = lastBlock.getChainId();
+            int difficulty = lastBlock.getSpamPowDifficulty();
+            String blockHash = lastBlock.getHash();
+            String hashFunction = lastBlock.getSpamPowHashFunction();
+            Ed25519PrivateKeyParameters privateKeyRebuild = new Ed25519PrivateKeyParameters(Hex.decodeHex(privateKey), 0);
+            Ed25519PublicKeyParameters publicKeyRebuild = privateKeyRebuild.generatePublicKey();
+            String publicKey = Hex.encodeHexString(publicKeyRebuild.getEncoded());
             var tx = VegaAuthUtils.buildTx(publicKey, privateKey,
-                    lastBlock.getChainId(), lastBlock.getSpamPowDifficulty(),
-                    lastBlock.getHash(), lastBlock.getSpamPowHashFunction(), inputData);
-            log.info(Base64.encodeBase64String(tx.toByteArray()));
-            Core.CheckTransactionRequest checkTx = Core.CheckTransactionRequest.newBuilder()
-                    .setTx(tx)
-                    .build();
-            var response = getCoreClient().checkTransaction(checkTx);
+                    chainId, difficulty, blockHash, hashFunction, inputData);
+            Core.SubmitTransactionRequest submitTx = Core.SubmitTransactionRequest.newBuilder()
+                    .setTx(tx).build();
+            var response = getCoreClient().submitTransaction(submitTx);
             log.info(response.toString());
-            // TODO - send tx
         } catch(Exception e) {
             log.error(e.getMessage(), e);
         }
     }
 
     /**
-     * Get the builder for {@link vega.commands.v1.TransactionOuterClass.InputData}
+     * Vote on a proposal
      *
-     * @param blockHeight the latest block height
-     *
-     * @return {@link TransactionOuterClass.InputData.Builder}
+     * @param proposalId the proposal ID
+     * @param value {@link vega.Governance.Vote.Value}
      */
-    private TransactionOuterClass.InputData.Builder getInputDataBuilder(
-            final long blockHeight
+    public void voteOnProposal(
+            final String proposalId,
+            final Governance.Vote.Value value
     ) {
-        return TransactionOuterClass.InputData.newBuilder()
-                .setNonce(Math.abs(new Random().nextLong()))
-                .setBlockHeight(blockHeight);
+        var voteSubmission = Commands.VoteSubmission.newBuilder()
+                .setProposalId(proposalId)
+                .setValue(value)
+                .build();
+        var lastBlock = getLastBlock();
+        long nonce = Math.abs(new Random().nextLong());
+        long height = lastBlock.getHeight();
+        var inputData = TransactionOuterClass.InputData.newBuilder()
+                .setNonce(nonce)
+                .setBlockHeight(height)
+                .setVoteSubmission(voteSubmission)
+                .build();
+        signAndSend(lastBlock, inputData);
     }
 
     /**
@@ -163,8 +176,13 @@ public class VegaGrpcClient {
                 .setType(type)
                 .build();
         var lastBlock = getLastBlock();
-        var inputData = getInputDataBuilder(lastBlock.getHeight())
-                .setOrderSubmission(orderSubmission).build();
+        long nonce = Math.abs(new Random().nextLong());
+        long height = lastBlock.getHeight();
+        var inputData = TransactionOuterClass.InputData.newBuilder()
+                .setNonce(nonce)
+                .setBlockHeight(height)
+                .setOrderSubmission(orderSubmission)
+                .build();
         signAndSend(lastBlock, inputData);
     }
 

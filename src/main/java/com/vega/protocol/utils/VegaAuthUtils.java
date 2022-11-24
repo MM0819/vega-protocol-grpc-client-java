@@ -13,7 +13,6 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.Base64;
 import java.util.UUID;
 
 @Slf4j
@@ -60,10 +59,11 @@ public class VegaAuthUtils {
                 .setTid(txId)
                 .setNonce(nonce).build();
         return TransactionOuterClass.Transaction.newBuilder()
+                .setVersion(TransactionOuterClass.TxVersion.TX_VERSION_V3)
                 .setSignature(signature)
                 .setPubKey(publicKey)
                 .setPow(proofOfWork)
-                .setInputData(ByteString.copyFrom(inputDataPacked))
+                .setInputData(inputData.toByteString())
                 .build();
     }
 
@@ -88,7 +88,6 @@ public class VegaAuthUtils {
         byte[] hash;
         if(!powHashFunction.equals("sha3_24_rounds")) throw new Exception("unsupported hash function");
         while (true) {
-            MessageDigest digest = MessageDigest.getInstance("SHA3-256");
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream( );
             outputStream.write("Vega_SPAM_PoW".getBytes(StandardCharsets.UTF_8));
             outputStream.write(blockHash.getBytes(StandardCharsets.UTF_8));
@@ -97,7 +96,7 @@ public class VegaAuthUtils {
             buffer.putLong(nonce);
             outputStream.write(buffer.array());
             byte[] dataPacked = outputStream.toByteArray();
-            hash = digest.digest(dataPacked);
+            hash = sha3(dataPacked);
             int leadingZeroes = countZeroes(hash);
             if(leadingZeroes >= difficulty) {
                 break;
@@ -156,8 +155,19 @@ public class VegaAuthUtils {
     private static String sign(String key, byte[] msg) throws Exception {
         Signer signer = new Ed25519Signer();
         signer.init(true, new Ed25519PrivateKeyParameters(Hex.decodeHex(key), 0));
+        msg = sha3(msg);
+        log.info("Hash before signing = {}", Hex.encodeHexString(msg));
         signer.update(msg, 0, msg.length);
         byte[] signature = signer.generateSignature();
         return Hex.encodeHexString(signature);
+    }
+
+    public static byte[] sha3(byte[] data) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA3-256");
+            return digest.digest(data);
+        } catch(Exception e) {
+            return new byte[]{};
+        }
     }
 }
