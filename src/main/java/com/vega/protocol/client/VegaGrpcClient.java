@@ -56,6 +56,30 @@ public class VegaGrpcClient {
         return CoreServiceGrpc.newBlockingStub(getChannel());
     }
 
+    private void signAndSend(
+            final String partyId,
+            final Core.LastBlockHeightResponse lastBlock,
+            final TransactionOuterClass.InputData inputData
+    ) {
+        try {
+            String encodedTx = VegaAuthUtils.buildTx(partyId, getPrivateKey(),
+                    lastBlock.getChainId(), lastBlock.getSpamPowDifficulty(),
+                    lastBlock.getHash(), lastBlock.getSpamPowHashFunction(), inputData);
+            log.info(encodedTx);
+            // TODO - send tx
+        } catch(Exception e) {
+            log.error(e.getMessage(), e);
+        }
+    }
+
+    private TransactionOuterClass.InputData.Builder getInputDataBuilder(
+            final long blockHeight
+    ) {
+        return TransactionOuterClass.InputData.newBuilder()
+                .setNonce(Math.abs(new Random().nextLong()))
+                .setBlockHeight(blockHeight);
+    }
+
     public void submitOrder(
             final String price,
             final long size,
@@ -74,20 +98,9 @@ public class VegaGrpcClient {
                 .setType(type)
                 .build();
         var lastBlock = getLastBlock();
-        TransactionOuterClass.InputData inputData = TransactionOuterClass.InputData.newBuilder()
-                .setNonce(Math.abs(new Random().nextLong()))
-                .setBlockHeight(lastBlock.getHeight())
-                .setOrderSubmission(orderSubmission)
-                .build();
-        try {
-            String encodedTx = VegaAuthUtils.buildTx(partyId, getPrivateKey(),
-                    lastBlock.getChainId(), lastBlock.getSpamPowDifficulty(),
-                    lastBlock.getHash(), lastBlock.getSpamPowHashFunction(), inputData);
-            log.info(encodedTx);
-        } catch(Exception e) {
-            log.error(e.getMessage(), e);
-        }
-//        getCoreClient().checkTransaction()
+        var inputData = getInputDataBuilder(lastBlock.getHeight())
+                .setOrderSubmission(orderSubmission).build();
+        signAndSend(partyId, lastBlock, inputData);
     }
 
     /**
