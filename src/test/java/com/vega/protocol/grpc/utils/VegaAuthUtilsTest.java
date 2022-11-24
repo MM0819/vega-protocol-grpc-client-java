@@ -1,7 +1,6 @@
-package com.vega.protocol.utils;
+package com.vega.protocol.grpc.utils;
 
 import com.vega.protocol.grpc.model.KeyPair;
-import com.vega.protocol.grpc.utils.VegaAuthUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.binary.Base64;
 import org.junit.jupiter.api.Assertions;

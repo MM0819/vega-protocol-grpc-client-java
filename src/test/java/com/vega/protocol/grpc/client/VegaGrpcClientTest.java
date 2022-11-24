@@ -1,6 +1,5 @@
-package com.vega.protocol.client;
+package com.vega.protocol.grpc.client;
 
-import com.vega.protocol.grpc.client.VegaGrpcClient;
 import com.vega.protocol.grpc.model.Wallet;
 import com.vega.protocol.grpc.utils.VegaAuthUtils;
 import org.apache.commons.codec.DecoderException;
