@@ -30,7 +30,8 @@ import java.util.stream.Collectors;
 public class VegaGrpcClient {
 
     private static final String DEFAULT_HOSTNAME = "api.n10.testnet.vega.xyz";
-    private static final int DEFAULT_PORT = 3002;
+    private static final int DEFAULT_PORT = 3007;
+    private static final int DEFAULT_CORE_PORT = 3002;
 
     private final String privateKey;
 
@@ -47,7 +48,7 @@ public class VegaGrpcClient {
      * @return {@link TradingDataServiceGrpc.TradingDataServiceBlockingStub}
      */
     public TradingDataServiceGrpc.TradingDataServiceBlockingStub getClient() {
-        return TradingDataServiceGrpc.newBlockingStub(getChannel());
+        return TradingDataServiceGrpc.newBlockingStub(getChannel(getPort()));
     }
 
     /**
@@ -56,16 +57,20 @@ public class VegaGrpcClient {
      * @return {@link TradingDataServiceGrpc.TradingDataServiceStub}
      */
     public TradingDataServiceGrpc.TradingDataServiceStub getStreamingClient() {
-        return TradingDataServiceGrpc.newStub(getChannel());
+        return TradingDataServiceGrpc.newStub(getChannel(getPort()));
     }
 
     /**
      * Get the gRPC channel
      *
+     * @param port the channel port
+     *
      * @return {@link ManagedChannel}
      */
-    private ManagedChannel getChannel() {
-        return ManagedChannelBuilder.forAddress(getHostname(), getPort()).usePlaintext().build();
+    private ManagedChannel getChannel(
+            final int port
+    ) {
+        return ManagedChannelBuilder.forAddress(getHostname(), port).usePlaintext().build();
     }
 
     /**
@@ -87,12 +92,21 @@ public class VegaGrpcClient {
     }
 
     /**
+     * Get the core port from environment
+     *
+     * @return $CORE_PORT or 3002
+     */
+    private int getCorePort() {
+        return Integer.parseInt(System.getenv().getOrDefault("CORE_PORT", String.valueOf(DEFAULT_CORE_PORT)));
+    }
+
+    /**
      * Get the core gRPC client (blocking)
      *
      * @return {@link CoreServiceGrpc.CoreServiceBlockingStub}
      */
     public CoreServiceGrpc.CoreServiceBlockingStub getCoreClient() {
-        return CoreServiceGrpc.newBlockingStub(getChannel());
+        return CoreServiceGrpc.newBlockingStub(getChannel(getCorePort()));
     }
 
     /**
@@ -110,7 +124,8 @@ public class VegaGrpcClient {
             int difficulty = lastBlock.getSpamPowDifficulty();
             String blockHash = lastBlock.getHash();
             String hashFunction = lastBlock.getSpamPowHashFunction();
-            Ed25519PrivateKeyParameters privateKeyRebuild = new Ed25519PrivateKeyParameters(Hex.decodeHex(privateKey), 0);
+            Ed25519PrivateKeyParameters privateKeyRebuild = new Ed25519PrivateKeyParameters(
+                    Hex.decodeHex(privateKey), 0);
             Ed25519PublicKeyParameters publicKeyRebuild = privateKeyRebuild.generatePublicKey();
             String publicKey = Hex.encodeHexString(publicKeyRebuild.getEncoded());
             var tx = VegaAuthUtils.buildTx(publicKey, privateKey,

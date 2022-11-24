@@ -1,8 +1,9 @@
 package com.vega.protocol.utils;
 
-import com.google.protobuf.ByteString;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.codec.DecoderException;
 import org.apache.commons.codec.binary.Hex;
+import org.bouncycastle.crypto.CryptoException;
 import org.bouncycastle.crypto.Signer;
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters;
 import org.bouncycastle.crypto.signers.Ed25519Signer;
@@ -13,6 +14,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.UUID;
 
 @Slf4j
@@ -86,7 +88,7 @@ public class VegaAuthUtils {
             final String powHashFunction) throws Exception {
         long nonce = 0;
         byte[] hash;
-        if(!powHashFunction.equals("sha3_24_rounds")) throw new Exception("unsupported hash function");
+        if(!powHashFunction.equals("sha3_24_rounds")) throw new Exception("Unsupported hash function !!");
         while (true) {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream( );
             outputStream.write("Vega_SPAM_PoW".getBytes(StandardCharsets.UTF_8));
@@ -150,9 +152,12 @@ public class VegaAuthUtils {
      *
      * @return the signature as hex string
      *
-     * @throws Exception thrown if signing error occurs
+     * @throws DecoderException hex decoding error
+     * @throws NoSuchAlgorithmException invalid hashing algorithm
+     * @throws CryptoException error during hashing / signing
      */
-    private static String sign(String key, byte[] msg) throws Exception {
+    private static String sign(String key, byte[] msg) throws
+            DecoderException, NoSuchAlgorithmException, CryptoException {
         Signer signer = new Ed25519Signer();
         signer.init(true, new Ed25519PrivateKeyParameters(Hex.decodeHex(key), 0));
         msg = sha3(msg);
@@ -162,12 +167,17 @@ public class VegaAuthUtils {
         return Hex.encodeHexString(signature);
     }
 
-    public static byte[] sha3(byte[] data) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA3-256");
-            return digest.digest(data);
-        } catch(Exception e) {
-            return new byte[]{};
-        }
+    /**
+     * Execute SHA3-256 hash of raw bytes
+     *
+     * @param data the input data
+     *
+     * @return the output bytes
+     *
+     * @throws NoSuchAlgorithmException invalid hashing algorithm
+     */
+    public static byte[] sha3(byte[] data) throws NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA3-256");
+        return digest.digest(data);
     }
 }
