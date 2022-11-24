@@ -28,41 +28,84 @@ public class VegaGrpcClient {
     private static final String DEFAULT_HOSTNAME = "api.n10.testnet.vega.xyz";
     private static final int DEFAULT_PORT = 3007;
 
+    private final String privateKey;
+    private final String publicKey;
+
+    // TODO - in future the user should be able to pass a wallet object that contains multiple public keys
+    public VegaGrpcClient(
+            final String privateKey,
+            final String publicKey
+    ) {
+        this.privateKey = privateKey;
+        this.publicKey = publicKey;
+    }
+
+    /**
+     * Get the data node blocking client
+     *
+     * @return {@link TradingDataServiceGrpc.TradingDataServiceBlockingStub}
+     */
     public TradingDataServiceGrpc.TradingDataServiceBlockingStub getClient() {
         return TradingDataServiceGrpc.newBlockingStub(getChannel());
     }
 
+    /**
+     * Get the data node non-blocking client (for streaming)
+     *
+     * @return {@link TradingDataServiceGrpc.TradingDataServiceStub}
+     */
     public TradingDataServiceGrpc.TradingDataServiceStub getStreamingClient() {
         return TradingDataServiceGrpc.newStub(getChannel());
     }
 
+    /**
+     * Get the gRPC channel
+     *
+     * @return {@link ManagedChannel}
+     */
     private ManagedChannel getChannel() {
         return ManagedChannelBuilder.forAddress(getHostname(), getPort()).usePlaintext().build();
     }
 
+    /**
+     * Get the hostname from environment
+     *
+     * @return $HOSTNAME or api.n10.testnet.vega.xyz
+     */
     private String getHostname() {
         return System.getenv().getOrDefault("HOSTNAME", DEFAULT_HOSTNAME);
     }
 
+    /**
+     * Get the port from environment
+     *
+     * @return $PORT or 3007
+     */
     private int getPort() {
         return Integer.parseInt(System.getenv().getOrDefault("PORT", String.valueOf(DEFAULT_PORT)));
     }
 
-    private String getPrivateKey() {
-        return System.getenv("PRIVATE_KEY");
-    }
-
+    /**
+     * Get the core gRPC client (blocking)
+     *
+     * @return {@link CoreServiceGrpc.CoreServiceBlockingStub}
+     */
     public CoreServiceGrpc.CoreServiceBlockingStub getCoreClient() {
         return CoreServiceGrpc.newBlockingStub(getChannel());
     }
 
+    /**
+     * Sign and send a transaction
+     *
+     * @param lastBlock the latest block {@link Core.LastBlockHeightResponse}
+     * @param inputData the input data {@link TransactionOuterClass.InputData}
+     */
     private void signAndSend(
-            final String partyId,
             final Core.LastBlockHeightResponse lastBlock,
             final TransactionOuterClass.InputData inputData
     ) {
         try {
-            String encodedTx = VegaAuthUtils.buildTx(partyId, getPrivateKey(),
+            String encodedTx = VegaAuthUtils.buildTx(publicKey, privateKey,
                     lastBlock.getChainId(), lastBlock.getSpamPowDifficulty(),
                     lastBlock.getHash(), lastBlock.getSpamPowHashFunction(), inputData);
             log.info(encodedTx);
@@ -72,6 +115,13 @@ public class VegaGrpcClient {
         }
     }
 
+    /**
+     * Get the builder for {@link vega.commands.v1.TransactionOuterClass.InputData}
+     *
+     * @param blockHeight the latest block height
+     *
+     * @return {@link TransactionOuterClass.InputData.Builder}
+     */
     private TransactionOuterClass.InputData.Builder getInputDataBuilder(
             final long blockHeight
     ) {
@@ -80,14 +130,23 @@ public class VegaGrpcClient {
                 .setBlockHeight(blockHeight);
     }
 
+    /**
+     * Submit an order
+     *
+     * @param price the order price
+     * @param size the order size
+     * @param side {@link vega.Vega.Side}
+     * @param timeInForce {@link vega.Vega.Order.TimeInForce}
+     * @param type {@link vega.Vega.Order.Type}
+     * @param marketId the market ID
+     */
     public void submitOrder(
             final String price,
             final long size,
             final Vega.Side side,
             final Vega.Order.TimeInForce timeInForce,
             final Vega.Order.Type type,
-            final String marketId,
-            final String partyId
+            final String marketId
     ) {
         var orderSubmission = Commands.OrderSubmission.newBuilder()
                 .setPrice(price)
@@ -100,7 +159,7 @@ public class VegaGrpcClient {
         var lastBlock = getLastBlock();
         var inputData = getInputDataBuilder(lastBlock.getHeight())
                 .setOrderSubmission(orderSubmission).build();
-        signAndSend(partyId, lastBlock, inputData);
+        signAndSend(lastBlock, inputData);
     }
 
     /**
