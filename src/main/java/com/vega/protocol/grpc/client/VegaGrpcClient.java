@@ -1,16 +1,17 @@
-package com.vega.protocol.client;
+package com.vega.protocol.grpc.client;
 
-import com.vega.protocol.observer.VegaStreamObserver;
-import com.vega.protocol.utils.VegaAuthUtils;
+import com.vega.protocol.grpc.error.ErrorCode;
+import com.vega.protocol.grpc.exception.VegaGrpcClientException;
+import com.vega.protocol.grpc.model.KeyPair;
+import com.vega.protocol.grpc.model.Wallet;
+import com.vega.protocol.grpc.observer.VegaStreamObserver;
+import com.vega.protocol.grpc.utils.VegaAuthUtils;
 import datanode.api.v2.TradingData;
 import datanode.api.v2.TradingDataServiceGrpc;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.lang3.StringUtils;
-import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters;
-import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
 import vega.Assets;
 import vega.Governance;
 import vega.Markets;
@@ -22,6 +23,7 @@ import vega.commands.v1.TransactionOuterClass;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -33,13 +35,13 @@ public class VegaGrpcClient {
     private static final int DEFAULT_PORT = 3007;
     private static final int DEFAULT_CORE_PORT = 3002;
 
-    private final String privateKey;
+    private final Wallet wallet;
 
     // TODO - allow user to pass Wallet object containing multiple keys
     public VegaGrpcClient(
-            final String privateKey
+            final Wallet wallet
     ) {
-        this.privateKey = privateKey;
+        this.wallet = wallet;
     }
 
     /**
@@ -114,29 +116,30 @@ public class VegaGrpcClient {
      *
      * @param lastBlock the latest block {@link Core.LastBlockHeightResponse}
      * @param inputData the input data {@link TransactionOuterClass.InputData}
+     * @param publicKey the signing key
+     *
+     * @return {@link Optional<Core.SubmitTransactionResponse>}
      */
-    private void signAndSend(
+    private Optional<Core.SubmitTransactionResponse> signAndSend(
             final Core.LastBlockHeightResponse lastBlock,
-            final TransactionOuterClass.InputData inputData
+            final TransactionOuterClass.InputData inputData,
+            final String publicKey
     ) {
         try {
             String chainId = lastBlock.getChainId();
             int difficulty = lastBlock.getSpamPowDifficulty();
             String blockHash = lastBlock.getHash();
             String hashFunction = lastBlock.getSpamPowHashFunction();
-            Ed25519PrivateKeyParameters privateKeyRebuild = new Ed25519PrivateKeyParameters(
-                    Hex.decodeHex(privateKey), 0);
-            Ed25519PublicKeyParameters publicKeyRebuild = privateKeyRebuild.generatePublicKey();
-            String publicKey = Hex.encodeHexString(publicKeyRebuild.getEncoded());
-            var tx = VegaAuthUtils.buildTx(publicKey, privateKey,
+            KeyPair keyPair = wallet.getWithPubKey(publicKey).orElseThrow(() -> new VegaGrpcClientException(ErrorCode.PUB_KEY_NOT_FOUND));
+            var tx = VegaAuthUtils.buildTx(keyPair,
                     chainId, difficulty, blockHash, hashFunction, inputData);
             Core.SubmitTransactionRequest submitTx = Core.SubmitTransactionRequest.newBuilder()
                     .setTx(tx).build();
-            var response = getCoreClient().submitTransaction(submitTx);
-            log.info(response.toString());
+            return Optional.of(getCoreClient().submitTransaction(submitTx));
         } catch(Exception e) {
             log.error(e.getMessage(), e);
         }
+        return Optional.empty();
     }
 
     /**
@@ -144,10 +147,14 @@ public class VegaGrpcClient {
      *
      * @param proposalId the proposal ID
      * @param value {@link vega.Governance.Vote.Value}
+     * @param publicKey the signing key
+     *
+     * @return {@link Optional<Core.SubmitTransactionResponse>}
      */
-    public void voteOnProposal(
+    public Optional<Core.SubmitTransactionResponse> voteOnProposal(
             final String proposalId,
-            final Governance.Vote.Value value
+            final Governance.Vote.Value value,
+            final String publicKey
     ) {
         var voteSubmission = Commands.VoteSubmission.newBuilder()
                 .setProposalId(proposalId)
@@ -161,7 +168,7 @@ public class VegaGrpcClient {
                 .setBlockHeight(height)
                 .setVoteSubmission(voteSubmission)
                 .build();
-        signAndSend(lastBlock, inputData);
+        return signAndSend(lastBlock, inputData, publicKey);
     }
 
     /**
@@ -173,14 +180,18 @@ public class VegaGrpcClient {
      * @param timeInForce {@link vega.Vega.Order.TimeInForce}
      * @param type {@link vega.Vega.Order.Type}
      * @param marketId the market ID
+     * @param publicKey the signing key
+     *
+     * @return {@link Optional<Core.SubmitTransactionResponse>}
      */
-    public void submitOrder(
+    public Optional<Core.SubmitTransactionResponse> submitOrder(
             final String price,
             final long size,
             final Vega.Side side,
             final Vega.Order.TimeInForce timeInForce,
             final Vega.Order.Type type,
-            final String marketId
+            final String marketId,
+            final String publicKey
     ) {
         var orderSubmission = Commands.OrderSubmission.newBuilder()
                 .setPrice(price)
@@ -198,7 +209,7 @@ public class VegaGrpcClient {
                 .setBlockHeight(height)
                 .setOrderSubmission(orderSubmission)
                 .build();
-        signAndSend(lastBlock, inputData);
+        return signAndSend(lastBlock, inputData, publicKey);
     }
 
     /**

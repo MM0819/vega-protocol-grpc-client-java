@@ -1,4 +1,4 @@
-package com.vega.protocol.observer;
+package com.vega.protocol.grpc.observer;
 
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;

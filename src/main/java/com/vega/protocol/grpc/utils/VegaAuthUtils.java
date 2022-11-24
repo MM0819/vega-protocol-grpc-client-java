@@ -1,11 +1,13 @@
-package com.vega.protocol.utils;
+package com.vega.protocol.grpc.utils;
 
+import com.vega.protocol.grpc.model.KeyPair;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.DecoderException;
 import org.apache.commons.codec.binary.Hex;
 import org.bouncycastle.crypto.CryptoException;
 import org.bouncycastle.crypto.Signer;
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters;
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
 import org.bouncycastle.crypto.signers.Ed25519Signer;
 import vega.commands.v1.SignatureOuterClass;
 import vega.commands.v1.TransactionOuterClass;
@@ -23,8 +25,7 @@ public class VegaAuthUtils {
     /**
      * Build and sign transaction
      *
-     * @param publicKey the signing public key
-     * @param privateKey the signing private key
+     * @param keyPair {@link KeyPair}
      * @param chainId the chain ID
      * @param difficulty proof-of-work difficulty
      * @param blockHash recent block hash
@@ -36,8 +37,7 @@ public class VegaAuthUtils {
      * @throws Exception thrown if exception occurs while building and signing tx
      */
     public static TransactionOuterClass.Transaction buildTx(
-            final String publicKey,
-            final String privateKey,
+            final KeyPair keyPair,
             final String chainId,
             final int difficulty,
             final String blockHash,
@@ -50,7 +50,7 @@ public class VegaAuthUtils {
         outputStream.write("\u0000".getBytes(StandardCharsets.UTF_8));
         outputStream.write(inputData.toByteArray());
         byte[] inputDataPacked = outputStream.toByteArray();
-        String hexSig = sign(privateKey, inputDataPacked);
+        String hexSig = sign(keyPair.getPrivateKey(), inputDataPacked);
         SignatureOuterClass.Signature signature = SignatureOuterClass.Signature.newBuilder()
                 .setVersion(1)
                 .setAlgo("vega/ed25519")
@@ -63,7 +63,7 @@ public class VegaAuthUtils {
         return TransactionOuterClass.Transaction.newBuilder()
                 .setVersion(TransactionOuterClass.TxVersion.TX_VERSION_V3)
                 .setSignature(signature)
-                .setPubKey(publicKey)
+                .setPubKey(keyPair.getPublicKey())
                 .setPow(proofOfWork)
                 .setInputData(inputData.toByteString())
                 .build();
@@ -179,5 +179,23 @@ public class VegaAuthUtils {
     public static byte[] sha3(byte[] data) throws NoSuchAlgorithmException {
         MessageDigest digest = MessageDigest.getInstance("SHA3-256");
         return digest.digest(data);
+    }
+
+    /**
+     * Get public key from private key (ed25519)
+     *
+     * @param privateKey the private key
+     *
+     * @return the public key
+     *
+     * @throws DecoderException hex decoding error
+     */
+    public static String getPublicKey(
+            final String privateKey
+    ) throws DecoderException {
+        Ed25519PrivateKeyParameters privateKeyRebuild = new Ed25519PrivateKeyParameters(
+                Hex.decodeHex(privateKey), 0);
+        Ed25519PublicKeyParameters publicKeyRebuild = privateKeyRebuild.generatePublicKey();
+        return Hex.encodeHexString(publicKeyRebuild.getEncoded());
     }
 }
