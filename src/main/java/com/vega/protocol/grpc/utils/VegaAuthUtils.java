@@ -1,5 +1,7 @@
 package com.vega.protocol.grpc.utils;
 
+import com.vega.protocol.grpc.error.ErrorCode;
+import com.vega.protocol.grpc.exception.VegaGrpcClientException;
 import com.vega.protocol.grpc.model.KeyPair;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.DecoderException;
@@ -88,7 +90,9 @@ public class VegaAuthUtils {
             final String powHashFunction) throws Exception {
         long nonce = 0;
         byte[] hash;
-        if(!powHashFunction.equals("sha3_24_rounds")) throw new Exception("Unsupported hash function !!");
+        if(!powHashFunction.equals("sha3_24_rounds")) {
+            throw new VegaGrpcClientException(ErrorCode.UNSUPPORTED_HASH_FUNCTION);
+        }
         while (true) {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream( );
             outputStream.write("Vega_SPAM_PoW".getBytes(StandardCharsets.UTF_8));
