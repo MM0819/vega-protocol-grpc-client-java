@@ -20,10 +20,11 @@ public class VegaGrpcClientTest {
     private VegaGrpcClient vegaGrpcClient;
 
     @BeforeEach
-    public void setup() {
+    public void setup() throws DecoderException {
         String mnemonic = "spawn item enter journey hill fringe collect type dress panel december solar receive " +
                 "jazz pioneer account emerge drop squirrel spot owner seven earth brown";
         Wallet wallet = new Wallet(mnemonic);
+        wallet.importKey(PRIVATE_KEY);
         vegaGrpcClient = new VegaGrpcClient(wallet);
     }
 

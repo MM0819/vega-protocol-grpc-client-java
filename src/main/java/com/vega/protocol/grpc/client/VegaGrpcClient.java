@@ -11,6 +11,7 @@ import datanode.api.v2.TradingDataServiceGrpc;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
 import vega.Assets;
 import vega.Governance;
@@ -37,7 +38,6 @@ public class VegaGrpcClient {
 
     private final Wallet wallet;
 
-    // TODO - allow user to pass Wallet object containing multiple keys
     public VegaGrpcClient(
             final Wallet wallet
     ) {
@@ -130,12 +130,17 @@ public class VegaGrpcClient {
             int difficulty = lastBlock.getSpamPowDifficulty();
             String blockHash = lastBlock.getHash();
             String hashFunction = lastBlock.getSpamPowHashFunction();
-            KeyPair keyPair = wallet.getWithPubKey(publicKey).orElseThrow(() -> new VegaGrpcClientException(ErrorCode.PUB_KEY_NOT_FOUND));
+            KeyPair keyPair = wallet.getWithPubKey(publicKey)
+                    .orElseThrow(() -> new VegaGrpcClientException(ErrorCode.PUB_KEY_NOT_FOUND));
             var tx = VegaAuthUtils.buildTx(keyPair,
                     chainId, difficulty, blockHash, hashFunction, inputData);
             Core.SubmitTransactionRequest submitTx = Core.SubmitTransactionRequest.newBuilder()
                     .setTx(tx).build();
-            return Optional.of(getCoreClient().submitTransaction(submitTx));
+            var response = getCoreClient().submitTransaction(submitTx);
+            if(!response.getSuccess()) {
+                log.error("Code = {}; Data = {}", response.getCode(), response.getData());
+            }
+            return Optional.of(response);
         } catch(Exception e) {
             log.error(e.getMessage(), e);
         }
@@ -167,6 +172,70 @@ public class VegaGrpcClient {
                 .setNonce(nonce)
                 .setBlockHeight(height)
                 .setVoteSubmission(voteSubmission)
+                .build();
+        return signAndSend(lastBlock, inputData, publicKey);
+    }
+
+    /**
+     * Cancel an order
+     *
+     * @param orderId the order ID
+     * @param marketId the market ID
+     * @param publicKey the signing key
+     *
+     * @return {@link Optional<Core.SubmitTransactionResponse>}
+     */
+    public Optional<Core.SubmitTransactionResponse> cancelOrder(
+            final String orderId,
+            final String marketId,
+            final String publicKey
+    ) {
+        var orderCancellation = Commands.OrderCancellation.newBuilder()
+                .setOrderId(orderId)
+                .setMarketId(marketId)
+                .build();
+        var lastBlock = getLastBlock();
+        long nonce = Math.abs(new Random().nextLong());
+        long height = lastBlock.getHeight();
+        var inputData = TransactionOuterClass.InputData.newBuilder()
+                .setNonce(nonce)
+                .setBlockHeight(height)
+                .setOrderCancellation(orderCancellation)
+                .build();
+        return signAndSend(lastBlock, inputData, publicKey);
+    }
+
+    /**
+     * Amend an order
+     *
+     * @param orderId the order ID
+     * @param sizeDelta the change in size
+     * @param price the price
+     * @param marketId the market ID
+     * @param publicKey the signing key
+     *
+     * @return {@link Optional<Core.SubmitTransactionResponse>}
+     */
+    public Optional<Core.SubmitTransactionResponse> amendOrder(
+            final String orderId,
+            final long sizeDelta,
+            final String price,
+            final String marketId,
+            final String publicKey
+    ) {
+        var orderAmendment = Commands.OrderAmendment.newBuilder()
+                .setOrderId(orderId)
+                .setSizeDelta(sizeDelta)
+                .setPrice(price)
+                .setMarketId(marketId)
+                .build();
+        var lastBlock = getLastBlock();
+        long nonce = Math.abs(new Random().nextLong());
+        long height = lastBlock.getHeight();
+        var inputData = TransactionOuterClass.InputData.newBuilder()
+                .setNonce(nonce)
+                .setBlockHeight(height)
+                .setOrderAmendment(orderAmendment)
                 .build();
         return signAndSend(lastBlock, inputData, publicKey);
     }
@@ -213,6 +282,140 @@ public class VegaGrpcClient {
     }
 
     /**
+     * Cancel a liquidity provision on a market
+     *
+     * @param marketId the market ID
+     * @param publicKey the signing key
+     *
+     * @return {@link Optional<Core.SubmitTransactionResponse>}
+     */
+    public Optional<Core.SubmitTransactionResponse> cancelLiquidityProvision(
+            final String marketId,
+            final String publicKey
+    ) {
+        var liquidityProvisionCancellation = Commands.LiquidityProvisionCancellation.newBuilder()
+                .setMarketId(marketId)
+                .build();
+        var lastBlock = getLastBlock();
+        long nonce = Math.abs(new Random().nextLong());
+        long height = lastBlock.getHeight();
+        var inputData = TransactionOuterClass.InputData.newBuilder()
+                .setNonce(nonce)
+                .setBlockHeight(height)
+                .setLiquidityProvisionCancellation(liquidityProvisionCancellation)
+                .build();
+        return signAndSend(lastBlock, inputData, publicKey);
+    }
+
+    /**
+     * Amend a liquidity provision on a market
+     *
+     * @param buys {@link List<vega.Vega.LiquidityOrder>}
+     * @param sells {@link List<vega.Vega.LiquidityOrder>}
+     * @param commitmentAmount the commitment amount
+     * @param fee the proposed fee
+     * @param marketId the market ID
+     * @param publicKey the signing key
+     *
+     * @return {@link Optional<Core.SubmitTransactionResponse>}
+     */
+    public Optional<Core.SubmitTransactionResponse> amendLiquidityProvision(
+            final List<Vega.LiquidityOrder> buys,
+            final List<Vega.LiquidityOrder> sells,
+            final String commitmentAmount,
+            final String fee,
+            final String marketId,
+            final String publicKey
+    ) {
+        var liquidityProvisionAmendment = Commands.LiquidityProvisionAmendment.newBuilder()
+                .addAllBuys(buys)
+                .addAllSells(sells)
+                .setCommitmentAmount(commitmentAmount)
+                .setMarketId(marketId)
+                .setFee(fee)
+                .build();
+        var lastBlock = getLastBlock();
+        long nonce = Math.abs(new Random().nextLong());
+        long height = lastBlock.getHeight();
+        var inputData = TransactionOuterClass.InputData.newBuilder()
+                .setNonce(nonce)
+                .setBlockHeight(height)
+                .setLiquidityProvisionAmendment(liquidityProvisionAmendment)
+                .build();
+        return signAndSend(lastBlock, inputData, publicKey);
+    }
+
+    /**
+     * Submit a liquidity provision to a market
+     *
+     * @param buys {@link List<vega.Vega.LiquidityOrder>}
+     * @param sells {@link List<vega.Vega.LiquidityOrder>}
+     * @param commitmentAmount the commitment amount
+     * @param fee the proposed fee
+     * @param marketId the market ID
+     * @param publicKey the signing key
+     *
+     * @return {@link Optional<Core.SubmitTransactionResponse>}
+     */
+    public Optional<Core.SubmitTransactionResponse> submitLiquidityProvision(
+            final List<Vega.LiquidityOrder> buys,
+            final List<Vega.LiquidityOrder> sells,
+            final String commitmentAmount,
+            final String fee,
+            final String marketId,
+            final String publicKey
+    ) {
+        var liquidityProvisionSubmission = Commands.LiquidityProvisionSubmission.newBuilder()
+                .addAllBuys(buys)
+                .addAllSells(sells)
+                .setCommitmentAmount(commitmentAmount)
+                .setMarketId(marketId)
+                .setFee(fee)
+                .build();
+        var lastBlock = getLastBlock();
+        long nonce = Math.abs(new Random().nextLong());
+        long height = lastBlock.getHeight();
+        var inputData = TransactionOuterClass.InputData.newBuilder()
+                .setNonce(nonce)
+                .setBlockHeight(height)
+                .setLiquidityProvisionSubmission(liquidityProvisionSubmission)
+                .build();
+        return signAndSend(lastBlock, inputData, publicKey);
+    }
+
+    /**
+     * Submit a batch market instruction
+     *
+     * @param amendments {@link List<vega.commands.v1.Commands.OrderAmendment>}
+     * @param cancellations {@link List<vega.commands.v1.Commands.OrderCancellation>}
+     * @param submissions {@link List<vega.commands.v1.Commands.OrderSubmission>}
+     * @param publicKey the signing key
+     *
+     * @return {@link Optional<Core.SubmitTransactionResponse>}
+     */
+    public Optional<Core.SubmitTransactionResponse> batchMarketInstruction(
+            final List<Commands.OrderAmendment> amendments,
+            final List<Commands.OrderCancellation> cancellations,
+            final List<Commands.OrderSubmission> submissions,
+            final String publicKey
+    ) {
+        var batchMarketInstruction = Commands.BatchMarketInstructions.newBuilder()
+                .addAllAmendments(amendments)
+                .addAllSubmissions(submissions)
+                .addAllCancellations(cancellations)
+                .build();
+        var lastBlock = getLastBlock();
+        long nonce = Math.abs(new Random().nextLong());
+        long height = lastBlock.getHeight();
+        var inputData = TransactionOuterClass.InputData.newBuilder()
+                .setNonce(nonce)
+                .setBlockHeight(height)
+                .setBatchMarketInstructions(batchMarketInstruction)
+                .build();
+        return signAndSend(lastBlock, inputData, publicKey);
+    }
+
+    /**
      * Get the last block
      *
      * @return {@link vega.api.v1.Core.LastBlockHeightResponse}
@@ -247,7 +450,74 @@ public class VegaGrpcClient {
     }
 
     /**
-     * Get all positions
+     * Get liquidity provisions
+     *
+     * @param partyId optional party ID
+     * @param marketId optional market ID
+     *
+     * @return {@link List<vega.Vega.Position>}
+     */
+    public List<Vega.LiquidityProvision> getLiquidityProvisions(
+            final String partyId,
+            final String marketId
+    ) {
+        var builder = TradingData.ListLiquidityProvisionsRequest.newBuilder();
+        if(!StringUtils.isEmpty(partyId)) {
+            builder = builder.setPartyId(partyId);
+        }
+        if(StringUtils.isEmpty(marketId)) {
+            builder = builder.setMarketId(marketId);
+        }
+        var request = builder.build();
+        var liquidityProvisions = getClient().listLiquidityProvisions(request)
+                .getLiquidityProvisions().getEdgesList();
+        return liquidityProvisions.stream().map(TradingData.LiquidityProvisionsEdge::getNode)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Get all network parameters
+     *
+     * @return {@link List<vega.Vega.NetworkParameter>}
+     */
+    public List<Vega.NetworkParameter> getNetworkParameters() {
+        var request = TradingData.ListNetworkParametersRequest.newBuilder().build();
+        var networkParameters = getClient().listNetworkParameters(request)
+                .getNetworkParameters().getEdgesList();
+        return networkParameters.stream().map(TradingData.NetworkParameterEdge::getNode).collect(Collectors.toList());
+    }
+
+    /**
+     * Get orders
+     *
+     * @param partyId optional party ID
+     * @param marketId optional market ID
+     * @param liveOnly optional to filter active orders
+     *
+     * @return {@link List<vega.Vega.Order>}
+     */
+    public List<Vega.Order> getOrders(
+            final String partyId,
+            final String marketId,
+            final Boolean liveOnly
+    ) {
+        var builder = TradingData.ListOrdersRequest.newBuilder();
+        if(!StringUtils.isEmpty(partyId)) {
+            builder = builder.setPartyId(partyId);
+        }
+        if(!StringUtils.isEmpty(marketId)) {
+            builder = builder.setMarketId(marketId);
+        }
+        if(!ObjectUtils.isEmpty(liveOnly)) {
+            builder.setLiveOnly(liveOnly);
+        }
+        var request = builder.build();
+        var orders = getClient().listOrders(request).getOrders().getEdgesList();
+        return orders.stream().map(TradingData.OrderEdge::getNode).collect(Collectors.toList());
+    }
+
+    /**
+     * Get positions
      *
      * @param partyId optional party ID
      * @param marketId optional market ID
