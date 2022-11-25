@@ -25,7 +25,7 @@ public class VegaGrpcClientTest {
                 "jazz pioneer account emerge drop squirrel spot owner seven earth brown";
         Wallet wallet = new Wallet(mnemonic);
         wallet.importKey(PRIVATE_KEY);
-        vegaGrpcClient = new VegaGrpcClient(wallet);
+        vegaGrpcClient = new VegaGrpcClient(wallet, port, corePort, hostname);
     }
 
     @Test

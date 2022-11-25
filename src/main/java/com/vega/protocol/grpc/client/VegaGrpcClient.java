@@ -32,16 +32,21 @@ import java.util.stream.Collectors;
 @Slf4j
 public class VegaGrpcClient {
 
-    private static final String DEFAULT_HOSTNAME = "api.n10.testnet.vega.xyz";
-    private static final int DEFAULT_PORT = 3007;
-    private static final int DEFAULT_CORE_PORT = 3002;
-
     private final Wallet wallet;
+    private final int port;
+    private final int corePort;
+    private final String hostname;
 
     public VegaGrpcClient(
-            final Wallet wallet
+            final Wallet wallet,
+            final String hostname,
+            final int port,
+            final int corePort
     ) {
         this.wallet = wallet;
+        this.port = port;
+        this.corePort = corePort;
+        this.hostname = hostname;
     }
 
     /**
@@ -76,30 +81,30 @@ public class VegaGrpcClient {
     }
 
     /**
-     * Get the hostname from environment
+     * Get the hostname
      *
-     * @return $HOSTNAME or api.n10.testnet.vega.xyz
+     * @return the hostname
      */
     private String getHostname() {
-        return System.getenv().getOrDefault("HOSTNAME", DEFAULT_HOSTNAME);
+        return hostname;
     }
 
     /**
-     * Get the port from environment
+     * Get the port
      *
-     * @return $PORT or 3007
+     * @return the port
      */
     private int getPort() {
-        return Integer.parseInt(System.getenv().getOrDefault("PORT", String.valueOf(DEFAULT_PORT)));
+        return port;
     }
 
     /**
-     * Get the core port from environment
+     * Get the core port
      *
-     * @return $CORE_PORT or 3002
+     * @return the core port
      */
     private int getCorePort() {
-        return Integer.parseInt(System.getenv().getOrDefault("CORE_PORT", String.valueOf(DEFAULT_CORE_PORT)));
+        return corePort;
     }
 
     /**
@@ -757,19 +762,19 @@ public class VegaGrpcClient {
      *
      * @param callback callback function accepting {@link List<vega.Vega.LiquidityProvision>}
      */
-    public void streamLiquidityCommitments(
+    public void streamLiquidityProvisions(
             final Consumer<List<Vega.LiquidityProvision>> callback
     ) {
-        streamLiquidityCommitments(null, callback);
+        streamLiquidityProvisions(null, callback);
     }
 
     /**
-     * Create a stream for liquidity commitments
+     * Create a stream for liquidity provisions
      *
      * @param partyId optional party ID
      * @param callback callback function accepting {@link List<vega.Vega.LiquidityProvision>}
      */
-    public void streamLiquidityCommitments(
+    public void streamLiquidityProvisions(
             final String partyId,
             final Consumer<List<Vega.LiquidityProvision>> callback
     ) {
