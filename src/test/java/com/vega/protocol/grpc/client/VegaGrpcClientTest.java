@@ -9,8 +9,10 @@ import org.junit.jupiter.api.Test;
 import vega.Governance;
 import vega.Markets;
 import vega.Vega;
+import vega.api.v1.Core;
 
 import java.util.List;
+import java.util.Optional;
 
 public class VegaGrpcClientTest {
 
@@ -25,13 +27,13 @@ public class VegaGrpcClientTest {
                 "jazz pioneer account emerge drop squirrel spot owner seven earth brown";
         Wallet wallet = new Wallet(mnemonic);
         wallet.importKey(PRIVATE_KEY);
-        vegaGrpcClient = new VegaGrpcClient(wallet, port, corePort, hostname);
+        vegaGrpcClient = new VegaGrpcClient(wallet, "n11.testnet.vega.xyz", 3007, 3002);
     }
 
     @Test
     public void testGetMarkets() {
         List<Markets.Market> markets = vegaGrpcClient.getMarkets();
-        Assertions.assertEquals(13, markets.size());
+        Assertions.assertTrue(markets.size() > 0);
     }
 
     @Test
@@ -53,14 +55,21 @@ public class VegaGrpcClientTest {
     public void testSubmitOrder() throws DecoderException {
         String marketId = "90e71c52b2f40db78efc24abe4217382993868cd24e45b3dd17147be4afaf884";
         String pubKey = VegaAuthUtils.getPublicKey(PRIVATE_KEY);
-        vegaGrpcClient.submitOrder("1000", 100L, Vega.Side.SIDE_BUY, Vega
-                .Order.TimeInForce.TIME_IN_FORCE_GTC, Vega.Order.Type.TYPE_LIMIT, marketId, pubKey);
+        Optional<Core.SubmitTransactionResponse> response = vegaGrpcClient.submitOrder(
+                "1000", 100L, Vega.Side.SIDE_BUY, Vega.Order.TimeInForce.TIME_IN_FORCE_GTC,
+                Vega.Order.Type.TYPE_LIMIT, marketId, pubKey
+        );
+        Assertions.assertTrue(response.isPresent());
+        Assertions.assertTrue(response.get().getSuccess());
     }
 
     @Test
     public void testVoteOnProposal() throws DecoderException {
         String proposalId = "7e2847d30ef2d4858f0f098c4251c789ad63ac9644e610ddb1cb014334a01ca6";
         String pubKey = VegaAuthUtils.getPublicKey(PRIVATE_KEY);
-        vegaGrpcClient.voteOnProposal(proposalId, Governance.Vote.Value.VALUE_NO, pubKey);
+        Optional<Core.SubmitTransactionResponse> response = vegaGrpcClient
+                .voteOnProposal(proposalId, Governance.Vote.Value.VALUE_NO, pubKey);
+        Assertions.assertTrue(response.isPresent());
+        Assertions.assertFalse(response.get().getSuccess());
     }
 }
