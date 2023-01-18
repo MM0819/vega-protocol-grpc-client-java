@@ -35,11 +35,8 @@ import java.util.stream.Collectors;
 public class VegaGrpcClient {
 
     private final Wallet wallet;
-    private final int port;
-    private final int corePort;
-    private final String hostname;
-    private final ManagedChannel coreChannel;
     private final ManagedChannel channel;
+    private final ManagedChannel coreChannel;
     private final Map<Long, List<ProofOfWork>> powByBlock = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
 
@@ -50,11 +47,8 @@ public class VegaGrpcClient {
             final int corePort
     ) {
         this.wallet = wallet;
-        this.port = port;
-        this.corePort = corePort;
-        this.hostname = hostname;
-        channel = ManagedChannelBuilder.forAddress(getHostname(), port).usePlaintext().build();
-        coreChannel = ManagedChannelBuilder.forAddress(getHostname(), corePort).usePlaintext().build();
+        channel = ManagedChannelBuilder.forAddress(hostname, port).usePlaintext().build();
+        coreChannel = ManagedChannelBuilder.forAddress(hostname, corePort).usePlaintext().build();
         scheduler.scheduleAtFixedRate(this::computeProofOfWork, 0, 1, TimeUnit.SECONDS);
     }
 
@@ -167,33 +161,6 @@ public class VegaGrpcClient {
      */
     public CoreServiceGrpc.CoreServiceBlockingStub getCoreClient() {
         return CoreServiceGrpc.newBlockingStub(coreChannel);
-    }
-
-    /**
-     * Get the hostname
-     *
-     * @return the hostname
-     */
-    private String getHostname() {
-        return hostname;
-    }
-
-    /**
-     * Get the port
-     *
-     * @return the port
-     */
-    private int getPort() {
-        return port;
-    }
-
-    /**
-     * Get the core port
-     *
-     * @return the core port
-     */
-    private int getCorePort() {
-        return corePort;
     }
 
     /**
