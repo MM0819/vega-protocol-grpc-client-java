@@ -38,6 +38,8 @@ public class VegaGrpcClient {
     private final int port;
     private final int corePort;
     private final String hostname;
+    private final ManagedChannel coreChannel;
+    private final ManagedChannel channel;
     private final Map<Long, List<ProofOfWork>> powByBlock = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
 
@@ -51,6 +53,8 @@ public class VegaGrpcClient {
         this.port = port;
         this.corePort = corePort;
         this.hostname = hostname;
+        channel = ManagedChannelBuilder.forAddress(getHostname(), port).usePlaintext().build();
+        coreChannel = ManagedChannelBuilder.forAddress(getHostname(), corePort).usePlaintext().build();
         scheduler.scheduleAtFixedRate(this::computeProofOfWork, 0, 1, TimeUnit.SECONDS);
     }
 
@@ -144,7 +148,7 @@ public class VegaGrpcClient {
      * @return {@link TradingDataServiceGrpc.TradingDataServiceBlockingStub}
      */
     public TradingDataServiceGrpc.TradingDataServiceBlockingStub getClient() {
-        return TradingDataServiceGrpc.newBlockingStub(getChannel(getPort()));
+        return TradingDataServiceGrpc.newBlockingStub(channel);
     }
 
     /**
@@ -153,7 +157,7 @@ public class VegaGrpcClient {
      * @return {@link Optional<TradingDataServiceGrpc.TradingDataServiceStub>}
      */
     public TradingDataServiceGrpc.TradingDataServiceStub getStreamingClient() {
-        return TradingDataServiceGrpc.newStub(getChannel(getPort()));
+        return TradingDataServiceGrpc.newStub(channel);
     }
 
     /**
@@ -162,20 +166,7 @@ public class VegaGrpcClient {
      * @return {@link CoreServiceGrpc.CoreServiceBlockingStub}
      */
     public CoreServiceGrpc.CoreServiceBlockingStub getCoreClient() {
-        return CoreServiceGrpc.newBlockingStub(getChannel(getCorePort()));
-    }
-
-    /**
-     * Get the gRPC channel
-     *
-     * @param port the channel port
-     *
-     * @return {@link Optional<ManagedChannel>}
-     */
-    private ManagedChannel getChannel(
-            final int port
-    ) {
-        return ManagedChannelBuilder.forAddress(getHostname(), port).usePlaintext().build();
+        return CoreServiceGrpc.newBlockingStub(coreChannel);
     }
 
     /**

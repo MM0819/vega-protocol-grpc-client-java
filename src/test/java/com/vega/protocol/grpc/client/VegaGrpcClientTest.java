@@ -4,7 +4,7 @@ import com.vega.protocol.grpc.model.Wallet;
 import com.vega.protocol.grpc.utils.VegaAuthUtils;
 import org.apache.commons.codec.DecoderException;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import vega.Governance;
 import vega.Markets;
@@ -23,10 +23,10 @@ public class VegaGrpcClientTest {
     private final static String PRIVATE_KEY = "e70da3716e54cfe4cbed58b584b85095bb4a8257a4b39ec91b491f29526430b6" +
             "053a10c3e8aa92bcfae80b61845a23a4dfc88d94a31570e3c494da9f43b64ca0";
 
-    private VegaGrpcClient vegaGrpcClient;
+    private static VegaGrpcClient vegaGrpcClient;
 
-    @BeforeEach
-    public void setup() throws DecoderException {
+    @BeforeAll
+    public static void setup() throws DecoderException {
         String mnemonic = "spawn item enter journey hill fringe collect type dress panel december solar receive " +
                 "jazz pioneer account emerge drop squirrel spot owner seven earth brown";
         Wallet wallet = new Wallet(mnemonic);
