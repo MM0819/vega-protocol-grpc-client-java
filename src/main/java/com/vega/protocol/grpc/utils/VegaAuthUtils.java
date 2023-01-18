@@ -3,6 +3,7 @@ package com.vega.protocol.grpc.utils;
 import com.vega.protocol.grpc.error.ErrorCode;
 import com.vega.protocol.grpc.exception.VegaGrpcClientException;
 import com.vega.protocol.grpc.model.KeyPair;
+import com.vega.protocol.grpc.model.ProofOfWork;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.DecoderException;
 import org.apache.commons.codec.binary.Hex;
@@ -19,19 +20,18 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.UUID;
 
 @Slf4j
-public class VegaAuthUtils {
+public final class VegaAuthUtils {
+
+    private VegaAuthUtils() {}
 
     /**
      * Build and sign transaction
      *
      * @param keyPair {@link KeyPair}
      * @param chainId the chain ID
-     * @param difficulty proof-of-work difficulty
-     * @param blockHash recent block hash
-     * @param powHashFunction proof-of-work hash function
+     * @param pow proof-of-work
      * @param inputData {@link vega.commands.v1.TransactionOuterClass.InputData}
      *
      * @return {@link TransactionOuterClass.Transaction}
@@ -41,12 +41,9 @@ public class VegaAuthUtils {
     public static TransactionOuterClass.Transaction buildTx(
             final KeyPair keyPair,
             final String chainId,
-            final int difficulty,
-            final String blockHash,
-            final String powHashFunction,
+            final ProofOfWork pow,
             final TransactionOuterClass.InputData inputData
     ) throws Exception {
-        String txId = UUID.randomUUID().toString();
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream( );
         outputStream.write(chainId.getBytes(StandardCharsets.UTF_8));
         outputStream.write("\u0000".getBytes(StandardCharsets.UTF_8));
@@ -58,10 +55,9 @@ public class VegaAuthUtils {
                 .setAlgo("vega/ed25519")
                 .setValue(hexSig)
                 .build();
-        long nonce = pow(difficulty, blockHash, txId, powHashFunction);
         TransactionOuterClass.ProofOfWork proofOfWork = TransactionOuterClass.ProofOfWork.newBuilder()
-                .setTid(txId)
-                .setNonce(nonce).build();
+                .setTid(pow.getTxId())
+                .setNonce(pow.getNonce()).build();
         return TransactionOuterClass.Transaction.newBuilder()
                 .setVersion(TransactionOuterClass.TxVersion.TX_VERSION_V3)
                 .setSignature(signature)
@@ -83,7 +79,7 @@ public class VegaAuthUtils {
      *
      * @throws Exception thrown if error occurs
      */
-    private static long pow(
+    public static long pow(
             final long difficulty,
             final String blockHash,
             final String txId,
@@ -165,7 +161,6 @@ public class VegaAuthUtils {
         Signer signer = new Ed25519Signer();
         signer.init(true, new Ed25519PrivateKeyParameters(Hex.decodeHex(key), 0));
         msg = sha3(msg);
-        log.info("Hash before signing = {}", Hex.encodeHexString(msg));
         signer.update(msg, 0, msg.length);
         byte[] signature = signer.generateSignature();
         return Hex.encodeHexString(signature);

@@ -3,6 +3,7 @@ package com.vega.protocol.grpc.client;
 import com.vega.protocol.grpc.error.ErrorCode;
 import com.vega.protocol.grpc.exception.VegaGrpcClientException;
 import com.vega.protocol.grpc.model.KeyPair;
+import com.vega.protocol.grpc.model.ProofOfWork;
 import com.vega.protocol.grpc.model.Wallet;
 import com.vega.protocol.grpc.observer.VegaStreamObserver;
 import com.vega.protocol.grpc.utils.VegaAuthUtils;
@@ -22,10 +23,11 @@ import vega.api.v1.CoreServiceGrpc;
 import vega.commands.v1.Commands;
 import vega.commands.v1.TransactionOuterClass;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
-import java.util.Random;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -36,6 +38,8 @@ public class VegaGrpcClient {
     private final int port;
     private final int corePort;
     private final String hostname;
+    private final Map<Long, List<ProofOfWork>> powByBlock = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
 
     public VegaGrpcClient(
             final Wallet wallet,
@@ -47,6 +51,91 @@ public class VegaGrpcClient {
         this.port = port;
         this.corePort = corePort;
         this.hostname = hostname;
+        scheduler.scheduleAtFixedRate(this::computeProofOfWork, 0, 1, TimeUnit.SECONDS);
+    }
+
+    /**
+     * Get network parameter by key if it exists
+     *
+     * @param key the parameter key
+     *
+     * @return {@link Optional<Vega.NetworkParameter>}
+     */
+    public Optional<Vega.NetworkParameter> getNetworkParameterByKey(final String key) {
+        return this.getNetworkParameters().stream().filter(p -> p.getKey().equals(key)).findFirst();
+    }
+
+    /**
+     * Compute and store new proof-of-work
+     */
+    private void computeProofOfWork() {
+        var lastBlock = getLastBlock();
+        powByBlock.computeIfAbsent(lastBlock.getHeight(), k -> new ArrayList<>());
+        var numberOfTxPerBlock = this.getNetworkParameterByKey("spam.pow.numberOfTxPerBlock");
+        var numberOfPastBlocks = this.getNetworkParameterByKey("spam.pow.numberOfPastBlocks");
+        if (powByBlock.get(lastBlock.getHeight()).size() == 0 &&
+                numberOfTxPerBlock.isPresent() &&
+                numberOfPastBlocks.isPresent()) {
+            var txPerBlock = Integer.parseInt(numberOfTxPerBlock.get().getValue());
+            var pastBlocks = Integer.parseInt(numberOfPastBlocks.get().getValue());
+            for (int i = 1; i <= 20; i++) {
+                var difficulty = lastBlock.getSpamPowDifficulty();
+                var extraZeroes = (int) Math.floor(((double) i) / ((double) txPerBlock));
+                difficulty = difficulty + extraZeroes;
+                try {
+                    var txId = UUID.randomUUID().toString();
+                    var nonce = VegaAuthUtils.pow(difficulty, lastBlock.getHash(),
+                            txId, lastBlock.getSpamPowHashFunction());
+                    var pow = new ProofOfWork()
+                            .setUsed(false)
+                            .setDifficulty(difficulty)
+                            .setBlockHeight(lastBlock.getHeight())
+                            .setBlockHash(lastBlock.getHash())
+                            .setNonce(nonce)
+                            .setTxId(txId);
+                    powByBlock.get(lastBlock.getHeight()).add(pow);
+                } catch (Exception e) {
+                    log.error(e.getMessage(), e);
+                }
+            }
+            var oldestBlock = lastBlock.getHeight() - Math.round(0.8 * pastBlocks);
+            powByBlock.keySet().stream().filter(k -> k <= oldestBlock).forEach(powByBlock::remove);
+        }
+    }
+
+    /**
+     * Taint a proof of work, so it won't be used twice
+     *
+     * @param blockHeight the block height
+     * @param txId the unique transaction ID
+     */
+    private void taintProofOfWork(long blockHeight, final String txId) {
+        List<ProofOfWork> powList = powByBlock.get(blockHeight);
+        for(ProofOfWork pow : powList) {
+            if(pow.getTxId().equals(txId)) {
+                pow.setUsed(true);
+            }
+        }
+    }
+
+    /**
+     * Get a new proof of work from the backlog
+     *
+     * @return {@link ProofOfWork}
+     */
+    private ProofOfWork getProofOfWork() {
+        List<ProofOfWork> powList = powByBlock.values()
+                .stream()
+                .flatMap(Collection::stream)
+                .filter(p -> !p.getUsed())
+                .sorted(Comparator.comparing(ProofOfWork::getBlockHeight).thenComparing(ProofOfWork::getDifficulty))
+                .toList();
+        if(powList.size() == 0) {
+            throw new VegaGrpcClientException(ErrorCode.WAITING_FOR_POW);
+        }
+        var pow = powList.get(0);
+        taintProofOfWork(pow.getBlockHeight(), pow.getTxId());
+        return pow;
     }
 
     /**
@@ -61,10 +150,19 @@ public class VegaGrpcClient {
     /**
      * Get the data node non-blocking client (for streaming)
      *
-     * @return {@link TradingDataServiceGrpc.TradingDataServiceStub}
+     * @return {@link Optional<TradingDataServiceGrpc.TradingDataServiceStub>}
      */
     public TradingDataServiceGrpc.TradingDataServiceStub getStreamingClient() {
         return TradingDataServiceGrpc.newStub(getChannel(getPort()));
+    }
+
+    /**
+     * Get the core gRPC client (blocking)
+     *
+     * @return {@link CoreServiceGrpc.CoreServiceBlockingStub}
+     */
+    public CoreServiceGrpc.CoreServiceBlockingStub getCoreClient() {
+        return CoreServiceGrpc.newBlockingStub(getChannel(getCorePort()));
     }
 
     /**
@@ -72,7 +170,7 @@ public class VegaGrpcClient {
      *
      * @param port the channel port
      *
-     * @return {@link ManagedChannel}
+     * @return {@link Optional<ManagedChannel>}
      */
     private ManagedChannel getChannel(
             final int port
@@ -108,41 +206,28 @@ public class VegaGrpcClient {
     }
 
     /**
-     * Get the core gRPC client (blocking)
-     *
-     * @return {@link CoreServiceGrpc.CoreServiceBlockingStub}
-     */
-    public CoreServiceGrpc.CoreServiceBlockingStub getCoreClient() {
-        return CoreServiceGrpc.newBlockingStub(getChannel(getCorePort()));
-    }
-
-    /**
      * Sign and send a transaction
      *
-     * @param lastBlock the latest block {@link Core.LastBlockHeightResponse}
      * @param inputData the input data {@link TransactionOuterClass.InputData}
+     * @param pow {@link ProofOfWork}
      * @param publicKey the signing key
      *
      * @return {@link Optional<Core.SubmitTransactionResponse>}
      */
     private Optional<Core.SubmitTransactionResponse> signAndSend(
-            final Core.LastBlockHeightResponse lastBlock,
             final TransactionOuterClass.InputData inputData,
+            final ProofOfWork pow,
             final String publicKey
     ) {
         try {
-            String chainId = lastBlock.getChainId();
-            int difficulty = lastBlock.getSpamPowDifficulty();
-            String blockHash = lastBlock.getHash();
-            String hashFunction = lastBlock.getSpamPowHashFunction();
+            String chainId = getLastBlock().getChainId();
             KeyPair keyPair = wallet.getWithPubKey(publicKey)
                     .orElseThrow(() -> new VegaGrpcClientException(ErrorCode.PUB_KEY_NOT_FOUND));
-            var tx = VegaAuthUtils.buildTx(keyPair,
-                    chainId, difficulty, blockHash, hashFunction, inputData);
+            var tx = VegaAuthUtils.buildTx(keyPair, chainId, pow, inputData);
             Core.SubmitTransactionRequest submitTx = Core.SubmitTransactionRequest.newBuilder()
                     .setTx(tx).build();
             var response = getCoreClient().submitTransaction(submitTx);
-            if(!response.getSuccess()) {
+            if (!response.getSuccess()) {
                 log.error("Code = {}; Data = {}", response.getCode(), response.getData());
             }
             return Optional.of(response);
@@ -150,6 +235,14 @@ public class VegaGrpcClient {
             log.error(e.getMessage(), e);
         }
         return Optional.empty();
+    }
+
+    private TransactionOuterClass.InputData.Builder getInputDataBuilder(
+            final ProofOfWork pow
+    ) {
+        return TransactionOuterClass.InputData.newBuilder()
+                .setNonce(Math.abs(new Random().nextLong()))
+                .setBlockHeight(pow.getBlockHeight());
     }
 
     /**
@@ -170,15 +263,11 @@ public class VegaGrpcClient {
                 .setProposalId(proposalId)
                 .setValue(value)
                 .build();
-        var lastBlock = getLastBlock();
-        long nonce = Math.abs(new Random().nextLong());
-        long height = lastBlock.getHeight();
-        var inputData = TransactionOuterClass.InputData.newBuilder()
-                .setNonce(nonce)
-                .setBlockHeight(height)
+        var pow = getProofOfWork();
+        var inputData = getInputDataBuilder(pow)
                 .setVoteSubmission(voteSubmission)
                 .build();
-        return signAndSend(lastBlock, inputData, publicKey);
+        return signAndSend(inputData, pow, publicKey);
     }
 
     /**
@@ -199,15 +288,11 @@ public class VegaGrpcClient {
                 .setOrderId(orderId)
                 .setMarketId(marketId)
                 .build();
-        var lastBlock = getLastBlock();
-        long nonce = Math.abs(new Random().nextLong());
-        long height = lastBlock.getHeight();
-        var inputData = TransactionOuterClass.InputData.newBuilder()
-                .setNonce(nonce)
-                .setBlockHeight(height)
+        var pow = getProofOfWork();
+        var inputData = getInputDataBuilder(pow)
                 .setOrderCancellation(orderCancellation)
                 .build();
-        return signAndSend(lastBlock, inputData, publicKey);
+        return signAndSend(inputData, pow, publicKey);
     }
 
     /**
@@ -234,15 +319,31 @@ public class VegaGrpcClient {
                 .setPrice(price)
                 .setMarketId(marketId)
                 .build();
-        var lastBlock = getLastBlock();
-        long nonce = Math.abs(new Random().nextLong());
-        long height = lastBlock.getHeight();
-        var inputData = TransactionOuterClass.InputData.newBuilder()
-                .setNonce(nonce)
-                .setBlockHeight(height)
+        var pow = getProofOfWork();
+        var inputData = getInputDataBuilder(pow)
                 .setOrderAmendment(orderAmendment)
                 .build();
-        return signAndSend(lastBlock, inputData, publicKey);
+        return signAndSend(inputData, pow, publicKey);
+    }
+
+    /**
+     * Submit an order
+     *
+     * @param size the order size
+     * @param side {@link vega.Vega.Side}
+     * @param marketId the market ID
+     * @param publicKey the signing key
+     *
+     * @return {@link Optional<Core.SubmitTransactionResponse>}
+     */
+    public Optional<Core.SubmitTransactionResponse> submitMarketOrder(
+            final long size,
+            final Vega.Side side,
+            final String marketId,
+            final String publicKey
+    ) {
+        return submitOrder("", size, side, Vega.Order.TimeInForce.TIME_IN_FORCE_IOC,
+                Vega.Order.Type.TYPE_MARKET, marketId, publicKey);
     }
 
     /**
@@ -275,15 +376,11 @@ public class VegaGrpcClient {
                 .setMarketId(marketId)
                 .setType(type)
                 .build();
-        var lastBlock = getLastBlock();
-        long nonce = Math.abs(new Random().nextLong());
-        long height = lastBlock.getHeight();
-        var inputData = TransactionOuterClass.InputData.newBuilder()
-                .setNonce(nonce)
-                .setBlockHeight(height)
+        var pow = getProofOfWork();
+        var inputData = getInputDataBuilder(pow)
                 .setOrderSubmission(orderSubmission)
                 .build();
-        return signAndSend(lastBlock, inputData, publicKey);
+        return signAndSend(inputData, pow, publicKey);
     }
 
     /**
@@ -301,15 +398,11 @@ public class VegaGrpcClient {
         var liquidityProvisionCancellation = Commands.LiquidityProvisionCancellation.newBuilder()
                 .setMarketId(marketId)
                 .build();
-        var lastBlock = getLastBlock();
-        long nonce = Math.abs(new Random().nextLong());
-        long height = lastBlock.getHeight();
-        var inputData = TransactionOuterClass.InputData.newBuilder()
-                .setNonce(nonce)
-                .setBlockHeight(height)
+        var pow = getProofOfWork();
+        var inputData = getInputDataBuilder(pow)
                 .setLiquidityProvisionCancellation(liquidityProvisionCancellation)
                 .build();
-        return signAndSend(lastBlock, inputData, publicKey);
+        return signAndSend(inputData, pow, publicKey);
     }
 
     /**
@@ -339,15 +432,11 @@ public class VegaGrpcClient {
                 .setMarketId(marketId)
                 .setFee(fee)
                 .build();
-        var lastBlock = getLastBlock();
-        long nonce = Math.abs(new Random().nextLong());
-        long height = lastBlock.getHeight();
-        var inputData = TransactionOuterClass.InputData.newBuilder()
-                .setNonce(nonce)
-                .setBlockHeight(height)
+        var pow = getProofOfWork();
+        var inputData = getInputDataBuilder(pow)
                 .setLiquidityProvisionAmendment(liquidityProvisionAmendment)
                 .build();
-        return signAndSend(lastBlock, inputData, publicKey);
+        return signAndSend(inputData, pow, publicKey);
     }
 
     /**
@@ -377,15 +466,11 @@ public class VegaGrpcClient {
                 .setMarketId(marketId)
                 .setFee(fee)
                 .build();
-        var lastBlock = getLastBlock();
-        long nonce = Math.abs(new Random().nextLong());
-        long height = lastBlock.getHeight();
-        var inputData = TransactionOuterClass.InputData.newBuilder()
-                .setNonce(nonce)
-                .setBlockHeight(height)
+        var pow = getProofOfWork();
+        var inputData = getInputDataBuilder(pow)
                 .setLiquidityProvisionSubmission(liquidityProvisionSubmission)
                 .build();
-        return signAndSend(lastBlock, inputData, publicKey);
+        return signAndSend(inputData, pow, publicKey);
     }
 
     /**
@@ -409,15 +494,11 @@ public class VegaGrpcClient {
                 .addAllSubmissions(submissions)
                 .addAllCancellations(cancellations)
                 .build();
-        var lastBlock = getLastBlock();
-        long nonce = Math.abs(new Random().nextLong());
-        long height = lastBlock.getHeight();
-        var inputData = TransactionOuterClass.InputData.newBuilder()
-                .setNonce(nonce)
-                .setBlockHeight(height)
+        var pow = getProofOfWork();
+        var inputData = getInputDataBuilder(pow)
                 .setBatchMarketInstructions(batchMarketInstruction)
                 .build();
-        return signAndSend(lastBlock, inputData, publicKey);
+        return signAndSend(inputData, pow, publicKey);
     }
 
     /**
