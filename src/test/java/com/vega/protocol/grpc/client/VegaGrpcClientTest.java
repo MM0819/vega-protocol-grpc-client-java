@@ -125,7 +125,7 @@ public class VegaGrpcClientTest {
 
     @Test
     public void testVoteOnProposal() throws Exception {
-        Thread.sleep(2000L);
+        Thread.sleep(1000L);
         String pubKey = VegaAuthUtils.getPublicKey(PRIVATE_KEY);
         Optional<Core.SubmitTransactionResponse> response = vegaGrpcClient
                 .voteOnProposal(PROPOSAL_ID, Governance.Vote.Value.VALUE_NO, pubKey);

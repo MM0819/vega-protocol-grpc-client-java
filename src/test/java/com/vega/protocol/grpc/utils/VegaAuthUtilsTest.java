@@ -6,11 +6,19 @@ import com.vega.protocol.grpc.model.KeyPair;
 import com.vega.protocol.grpc.model.ProofOfWork;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.codec.binary.Hex;
+import org.bouncycastle.crypto.generators.Ed25519KeyPairGenerator;
+import org.bouncycastle.crypto.params.Ed25519KeyGenerationParameters;
+import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters;
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
+import org.bouncycastle.math.ec.rfc8032.Ed25519;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import vega.Governance;
 import vega.commands.v1.Commands;
 import vega.commands.v1.TransactionOuterClass;
+
+import java.security.SecureRandom;
 
 @Slf4j
 public class VegaAuthUtilsTest {

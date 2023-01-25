@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -74,9 +75,11 @@ public class VegaGrpcClient {
         if (powByBlock.get(lastBlock.getHeight()).size() == 0 &&
                 numberOfTxPerBlock.isPresent() &&
                 numberOfPastBlocks.isPresent()) {
+            log.info("Computing pow...");
             var txPerBlock = Integer.parseInt(numberOfTxPerBlock.get().getValue());
             var pastBlocks = Integer.parseInt(numberOfPastBlocks.get().getValue());
-            for (int i = 1; i <= 20; i++) {
+            int total = 20;
+            for (int i = 1; i <= total; i++) {
                 var difficulty = lastBlock.getSpamPowDifficulty();
                 var extraZeroes = (int) Math.floor(((double) i) / ((double) txPerBlock));
                 difficulty = difficulty + extraZeroes;
@@ -96,8 +99,14 @@ public class VegaGrpcClient {
                     log.error(e.getMessage(), e);
                 }
             }
+            log.info("Saved {} pow!", total);
             var oldestBlock = lastBlock.getHeight() - Math.round(0.8 * pastBlocks);
-            powByBlock.keySet().stream().filter(k -> k <= oldestBlock).forEach(powByBlock::remove);
+            AtomicInteger i = new AtomicInteger();
+            powByBlock.keySet().stream().filter(k -> k <= oldestBlock).forEach(height -> {
+                powByBlock.remove(height);
+                i.getAndIncrement();
+            });
+            log.info("Deleted {} pow!", i);
         }
     }
 
@@ -499,7 +508,7 @@ public class VegaGrpcClient {
      * @param partyId optional party ID
      * @param marketId optional market ID
      *
-     * @return {@link List<vega.Vega.Position>}
+     * @return {@link List<vega.Vega.LiquidityProvision>}
      */
     public List<Vega.LiquidityProvision> getLiquidityProvisions(
             final String partyId,

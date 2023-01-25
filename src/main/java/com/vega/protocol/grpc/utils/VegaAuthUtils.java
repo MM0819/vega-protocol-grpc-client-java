@@ -186,15 +186,18 @@ public final class VegaAuthUtils {
      * @param privateKey the private key
      *
      * @return the public key
-     *
-     * @throws DecoderException hex decoding error
      */
     public static String getPublicKey(
             final String privateKey
-    ) throws DecoderException {
-        Ed25519PrivateKeyParameters privateKeyRebuild = new Ed25519PrivateKeyParameters(
-                Hex.decodeHex(privateKey), 0);
-        Ed25519PublicKeyParameters publicKeyRebuild = privateKeyRebuild.generatePublicKey();
-        return Hex.encodeHexString(publicKeyRebuild.getEncoded());
+    ) {
+        try {
+            Ed25519PrivateKeyParameters privateKeyRebuild = new Ed25519PrivateKeyParameters(
+                    Hex.decodeHex(privateKey), 0);
+            Ed25519PublicKeyParameters publicKeyRebuild = privateKeyRebuild.generatePublicKey();
+            return Hex.encodeHexString(publicKeyRebuild.getEncoded());
+        } catch(Exception e) {
+            log.error(e.getMessage(), e);
+            return "";
+        }
     }
 }
