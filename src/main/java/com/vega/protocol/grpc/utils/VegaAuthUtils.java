@@ -156,7 +156,7 @@ public final class VegaAuthUtils {
      * @throws NoSuchAlgorithmException invalid hashing algorithm
      * @throws CryptoException error during hashing / signing
      */
-    private static String sign(String key, byte[] msg) throws
+    public static String sign(String key, byte[] msg) throws
             DecoderException, NoSuchAlgorithmException, CryptoException {
         Signer signer = new Ed25519Signer();
         signer.init(true, new Ed25519PrivateKeyParameters(Hex.decodeHex(key), 0));
