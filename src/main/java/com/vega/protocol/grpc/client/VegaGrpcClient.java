@@ -45,6 +45,7 @@ public class VegaGrpcClient {
     private static final int DEFAULT_DN_PORT = 3007;
     private static final int[] DEFAULT_STAGNET_NODES = new int[]{5, 6};
     private static final int[] DEFAULT_FAIRGROUND_NODES = new int[]{6, 7, 8, 9, 10, 11, 12};
+    @Getter
     private final Wallet wallet;
     @Getter
     private final VegaEnvironment environment;
