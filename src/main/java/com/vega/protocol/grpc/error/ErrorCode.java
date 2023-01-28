@@ -5,4 +5,5 @@ public class ErrorCode {
     public static final String PUB_KEY_NOT_FOUND = "Public key not found.";
     public static final String UNSUPPORTED_HASH_FUNCTION = "Unsupported hash function.";
     public static final String WAITING_FOR_POW = "Waiting for more proof of work";
+    public static final String CANNOT_FIND_HEALTHY_DATA_NODE = "Cannot find healthy data node";
 }

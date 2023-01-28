@@ -1,10 +1,9 @@
 package com.vega.protocol.grpc.client;
 
+import com.vega.protocol.grpc.constant.VegaEnvironment;
 import com.vega.protocol.grpc.error.ErrorCode;
 import com.vega.protocol.grpc.exception.VegaGrpcClientException;
-import com.vega.protocol.grpc.model.KeyPair;
-import com.vega.protocol.grpc.model.ProofOfWork;
-import com.vega.protocol.grpc.model.Wallet;
+import com.vega.protocol.grpc.model.*;
 import com.vega.protocol.grpc.observer.VegaStreamObserver;
 import com.vega.protocol.grpc.utils.VegaAuthUtils;
 import datanode.api.v2.TradingData;
@@ -14,6 +13,7 @@ import io.grpc.ManagedChannelBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.json.JSONObject;
 import vega.Assets;
 import vega.Governance;
 import vega.Markets;
@@ -23,6 +23,12 @@ import vega.api.v1.CoreServiceGrpc;
 import vega.commands.v1.Commands;
 import vega.commands.v1.TransactionOuterClass;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -34,23 +40,152 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class VegaGrpcClient {
-
+    private static final int DEFAULT_CORE_PORT = 3002;
+    private static final int DEFAULT_DN_PORT = 3007;
     private final Wallet wallet;
     private final ManagedChannel channel;
     private final ManagedChannel coreChannel;
     private final Map<Long, List<ProofOfWork>> powByBlock = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
+    private static final List<DataNode> dataNodes = Collections.synchronizedList(new ArrayList<>());
 
+    /**
+     * Get the sync info from the Tendermint API
+     *
+     * @param tmUrl the Tendermint API URL
+     *
+     * @return {@link SyncInfo}
+     */
+    private static SyncInfo getSyncInfo(
+            final String tmUrl
+    ) {
+        var client = HttpClient.newBuilder().build();
+        var request = HttpRequest.newBuilder().GET().uri(URI.create(String.format("%s/status", tmUrl))).build();
+        try {
+            var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if(response.statusCode() != 200) {
+                return new SyncInfo().setTimestamp(0L).setReplaying(true).setBlockHeight(0L);
+            }
+            var json = new JSONObject(response.body());
+            var syncInfo = json.getJSONObject("result").getJSONObject("sync_info");
+            var ts = syncInfo.getString("latest_block_time").split("\\.")[0];
+            return new SyncInfo()
+                    .setTimestamp(LocalDateTime.parse(ts).toEpochSecond(ZoneOffset.UTC))
+                    .setReplaying(syncInfo.getBoolean("catching_up"))
+                    .setBlockHeight(syncInfo.getLong("latest_block_height"));
+        } catch(Exception e) {
+            log.warn("Unhealthy data node {}: {}", tmUrl, e.getMessage());
+        }
+        return new SyncInfo().setTimestamp(0L).setReplaying(true).setBlockHeight(0L);
+    }
+
+    /**
+     * Check if a data node is healthy by getting the Vega time from it and comparing to the current timestamp,
+     * it will be considered unhealthy if data node is more than 10 seconds behind current time
+     *
+     * @param grpcUrl the grpc URL
+     * @param tmUrl the Tendermint URL
+     *
+     * @return true / false
+     */
+    private static boolean isDataNodeHealthy(
+            final String grpcUrl,
+            final String tmUrl
+    ) {
+        try {
+            var coreChannel = ManagedChannelBuilder.forAddress(grpcUrl, DEFAULT_CORE_PORT).usePlaintext().build();
+            var coreStub = CoreServiceGrpc.newBlockingStub(coreChannel);
+            var timeRequest = Core.GetVegaTimeRequest.newBuilder().build();
+            var timeResponse = coreStub.getVegaTime(timeRequest);
+            var blockHeightRequest = Core.LastBlockHeightRequest.newBuilder().build();
+            var blockHeightResponse = coreStub.lastBlockHeight(blockHeightRequest);
+            var ts = timeResponse.getTimestamp() / 1000000000;
+            var now = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC);
+            var timeDiff = Math.abs(now - ts);
+            var syncInfo = getSyncInfo(tmUrl);
+            coreChannel.shutdownNow();
+            var heightDiff = Math.abs(syncInfo.getBlockHeight() - blockHeightResponse.getHeight());
+            var isHealthy = timeDiff <= 10 && !syncInfo.getReplaying() && heightDiff <= 2;
+            if(!isHealthy) {
+                log.warn("Unhealthy data node {}: Time diff = {}; replaying = {}; height diff = {}",
+                        tmUrl, timeDiff, syncInfo.getReplaying(), heightDiff);
+            } else {
+                log.info("{} = healthy!", grpcUrl);
+            }
+            return isHealthy;
+        } catch(Exception e) {
+            log.warn("Unhealthy data node {}: {}", tmUrl, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Build the data node object
+     *
+     * @param id data node ID
+     * @param environment {@link VegaEnvironment}
+     *
+     * @return {@link DataNode}
+     */
+    private static DataNode dataNode(
+            final int id,
+            final VegaEnvironment environment
+    ) {
+        String grpcUrl = String.format("n%02d.%s.vega.xyz", id, environment.getPrefix());
+        String tmUrl = String.format("https://tm.n%02d.%s.vega.xyz", id, environment.getPrefix());
+        Boolean isHealthy = isDataNodeHealthy(grpcUrl, tmUrl);
+        return new DataNode()
+                .setTmUrl(tmUrl)
+                .setGrpcUrl(grpcUrl)
+                .setEnvironment(environment)
+                .setHealthy(isHealthy);
+    }
+
+    // TODO - we should have constructors that allow the user to override these defaults
+
+    static {
+        int[] stagnet = {5, 6};
+        int[] fairground = {6, 7, 8, 9, 10, 11, 12};
+        Arrays.stream(stagnet).forEach(id -> dataNodes.add(dataNode(id, VegaEnvironment.STAGNET)));
+        Arrays.stream(fairground).forEach(id -> dataNodes.add(dataNode(id, VegaEnvironment.FAIRGROUND)));
+    }
+
+    /**
+     * Periodically check if the date node is healthy
+     */
+    private void checkDataNodeHealth() {
+        dataNodes.forEach(dn -> {
+            var healthy = isDataNodeHealthy(dn.getGrpcUrl(), dn.getTmUrl());
+            dn.setHealthy(healthy);
+        });
+    }
+
+    /**
+     * Get a random healthy data node
+     *
+     * @return {@link DataNode}
+     */
+    public Optional<DataNode> getHealthyDataNode() {
+        var nodes = dataNodes.stream().filter(DataNode::getHealthy).collect(Collectors.toList());
+        Collections.shuffle(nodes);
+        return nodes.stream().findFirst();
+    }
+
+    /**
+     * Create an instance of the {@link VegaGrpcClient}
+     *
+     * @param wallet {@link Wallet}
+     */
     public VegaGrpcClient(
-            final Wallet wallet,
-            final String hostname,
-            final int port,
-            final int corePort
+            final Wallet wallet
     ) {
         this.wallet = wallet;
-        channel = ManagedChannelBuilder.forAddress(hostname, port).usePlaintext().build();
-        coreChannel = ManagedChannelBuilder.forAddress(hostname, corePort).usePlaintext().build();
+        String hostname = dataNodes.stream().filter(DataNode::getHealthy).map(DataNode::getGrpcUrl).findFirst()
+                .orElseThrow(() -> new VegaGrpcClientException(ErrorCode.CANNOT_FIND_HEALTHY_DATA_NODE));
+        channel = ManagedChannelBuilder.forAddress(hostname, DEFAULT_DN_PORT).usePlaintext().build();
+        coreChannel = ManagedChannelBuilder.forAddress(hostname, DEFAULT_CORE_PORT).usePlaintext().build();
         scheduler.scheduleAtFixedRate(this::computeProofOfWork, 0, 1, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(this::checkDataNodeHealth, 0, 10, TimeUnit.SECONDS);
     }
 
     /**
@@ -75,7 +210,6 @@ public class VegaGrpcClient {
         if (powByBlock.get(lastBlock.getHeight()).size() == 0 &&
                 numberOfTxPerBlock.isPresent() &&
                 numberOfPastBlocks.isPresent()) {
-            log.info("Computing pow...");
             var txPerBlock = Integer.parseInt(numberOfTxPerBlock.get().getValue());
             var pastBlocks = Integer.parseInt(numberOfPastBlocks.get().getValue());
             int total = 20;
@@ -99,14 +233,12 @@ public class VegaGrpcClient {
                     log.error(e.getMessage(), e);
                 }
             }
-            log.info("Saved {} pow!", total);
             var oldestBlock = lastBlock.getHeight() - Math.round(0.8 * pastBlocks);
             AtomicInteger i = new AtomicInteger();
             powByBlock.keySet().stream().filter(k -> k <= oldestBlock).forEach(height -> {
                 powByBlock.remove(height);
                 i.getAndIncrement();
             });
-            log.info("Deleted {} pow!", i);
         }
     }
 

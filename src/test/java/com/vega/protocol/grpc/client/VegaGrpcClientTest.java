@@ -2,7 +2,6 @@ package com.vega.protocol.grpc.client;
 
 import com.vega.protocol.grpc.model.Wallet;
 import com.vega.protocol.grpc.utils.VegaAuthUtils;
-import org.apache.commons.codec.DecoderException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -26,12 +25,12 @@ public class VegaGrpcClientTest {
     private static VegaGrpcClient vegaGrpcClient;
 
     @BeforeAll
-    public static void setup() throws DecoderException {
+    public static void setup() {
         String mnemonic = "spawn item enter journey hill fringe collect type dress panel december solar receive " +
                 "jazz pioneer account emerge drop squirrel spot owner seven earth brown";
         Wallet wallet = new Wallet(mnemonic);
         wallet.importKey(PRIVATE_KEY);
-        vegaGrpcClient = new VegaGrpcClient(wallet, "n11.testnet.vega.xyz", 3007, 3002);
+        vegaGrpcClient = new VegaGrpcClient(wallet);
     }
 
     @Test

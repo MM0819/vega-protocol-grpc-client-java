@@ -19,6 +19,10 @@ public class Wallet {
         this.mnemonic = mnemonic;
     }
 
+    public Wallet() {
+        this.mnemonic = "";
+    }
+
     public KeyPair get(
             final int index
     ) {
@@ -39,7 +43,7 @@ public class Wallet {
 
     public void importKey(
             final String privateKey
-    ) throws DecoderException {
+    ) {
         String publicKey = VegaAuthUtils.getPublicKey(privateKey);
         importedKeys.add(new KeyPair().setPublicKey(publicKey).setPrivateKey(privateKey));
     }
