@@ -1,5 +1,6 @@
 package com.vega.protocol.grpc.client;
 
+import com.vega.protocol.grpc.constant.VegaEnvironment;
 import com.vega.protocol.grpc.model.Wallet;
 import com.vega.protocol.grpc.utils.VegaAuthUtils;
 import org.junit.jupiter.api.Assertions;
@@ -25,12 +26,12 @@ public class VegaGrpcClientTest {
     private static VegaGrpcClient vegaGrpcClient;
 
     @BeforeAll
-    public static void setup() {
+    public static void setup() throws InterruptedException {
         String mnemonic = "spawn item enter journey hill fringe collect type dress panel december solar receive " +
                 "jazz pioneer account emerge drop squirrel spot owner seven earth brown";
         Wallet wallet = new Wallet(mnemonic);
         wallet.importKey(PRIVATE_KEY);
-        vegaGrpcClient = new VegaGrpcClient(wallet);
+        vegaGrpcClient = new VegaGrpcClient(wallet, VegaEnvironment.FAIRGROUND);
     }
 
     @Test

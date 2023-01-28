@@ -10,6 +10,7 @@ import datanode.api.v2.TradingData;
 import datanode.api.v2.TradingDataServiceGrpc;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -42,12 +43,41 @@ import java.util.stream.Collectors;
 public class VegaGrpcClient {
     private static final int DEFAULT_CORE_PORT = 3002;
     private static final int DEFAULT_DN_PORT = 3007;
+    private static final int[] DEFAULT_STAGNET_NODES = new int[]{5, 6};
+    private static final int[] DEFAULT_FAIRGROUND_NODES = new int[]{6, 7, 8, 9, 10, 11, 12};
     private final Wallet wallet;
-    private final ManagedChannel channel;
-    private final ManagedChannel coreChannel;
+    @Getter
+    private final VegaEnvironment environment;
+    private ManagedChannel channel = null;
+    private ManagedChannel coreChannel = null;
+    @Getter
+    private Integer nodeId = 0;
     private final Map<Long, List<ProofOfWork>> powByBlock = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
     private static final List<DataNode> dataNodes = Collections.synchronizedList(new ArrayList<>());
+
+    // TODO - we should have constructors that allow the user to override these defaults
+
+    static {
+        Arrays.stream(DEFAULT_STAGNET_NODES).forEach(id -> dataNodes.add(dataNode(id, VegaEnvironment.STAGNET)));
+        Arrays.stream(DEFAULT_FAIRGROUND_NODES).forEach(id -> dataNodes.add(dataNode(id, VegaEnvironment.FAIRGROUND)));
+    }
+
+    /**
+     * Create an instance of the {@link VegaGrpcClient}
+     *
+     * @param wallet {@link Wallet}
+     */
+    public VegaGrpcClient(
+            final Wallet wallet,
+            final VegaEnvironment environment
+    ) {
+        this.wallet = wallet;
+        this.environment = environment;
+        updateHealthStatus();
+        scheduler.scheduleAtFixedRate(this::computeProofOfWork, 0, 1, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(this::updateHealthStatus, 0, 10, TimeUnit.SECONDS);
+    }
 
     /**
      * Get the sync info from the Tendermint API
@@ -94,21 +124,28 @@ public class VegaGrpcClient {
     ) {
         try {
             var coreChannel = ManagedChannelBuilder.forAddress(grpcUrl, DEFAULT_CORE_PORT).usePlaintext().build();
+            var dnChannel = ManagedChannelBuilder.forAddress(grpcUrl, DEFAULT_DN_PORT).usePlaintext().build();
             var coreStub = CoreServiceGrpc.newBlockingStub(coreChannel);
+            var dnStub = TradingDataServiceGrpc.newBlockingStub(dnChannel);
+            var dnTimeRequest = TradingData.GetVegaTimeRequest.newBuilder().build();
             var timeRequest = Core.GetVegaTimeRequest.newBuilder().build();
+            var dnTimeResponse = dnStub.getVegaTime(dnTimeRequest);
             var timeResponse = coreStub.getVegaTime(timeRequest);
             var blockHeightRequest = Core.LastBlockHeightRequest.newBuilder().build();
             var blockHeightResponse = coreStub.lastBlockHeight(blockHeightRequest);
-            var ts = timeResponse.getTimestamp() / 1000000000;
+            var tsCore = timeResponse.getTimestamp() / 1000000000;
+            var tsDN = dnTimeResponse.getTimestamp() / 1000000000;
             var now = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC);
-            var timeDiff = Math.abs(now - ts);
+            var timeDiffCore = Math.abs(now - tsCore);
+            var timeDiffDN = Math.abs(now - tsDN);
             var syncInfo = getSyncInfo(tmUrl);
             coreChannel.shutdownNow();
+            dnChannel.shutdownNow();
             var heightDiff = Math.abs(syncInfo.getBlockHeight() - blockHeightResponse.getHeight());
-            var isHealthy = timeDiff <= 10 && !syncInfo.getReplaying() && heightDiff <= 2;
+            var isHealthy = timeDiffCore <= 10 && timeDiffDN <= 10 && !syncInfo.getReplaying() && heightDiff <= 2;
             if(!isHealthy) {
-                log.warn("Unhealthy data node {}: Time diff = {}; replaying = {}; height diff = {}",
-                        tmUrl, timeDiff, syncInfo.getReplaying(), heightDiff);
+                log.warn("Unhealthy data node {}: Time diff (core) = {}; Time diff (DN) = {}; replaying = {}; " +
+                        "height diff = {}", tmUrl, timeDiffCore, timeDiffDN, syncInfo.getReplaying(), heightDiff);
             } else {
                 log.info("{} = healthy!", grpcUrl);
             }
@@ -133,31 +170,79 @@ public class VegaGrpcClient {
     ) {
         String grpcUrl = String.format("n%02d.%s.vega.xyz", id, environment.getPrefix());
         String tmUrl = String.format("https://tm.n%02d.%s.vega.xyz", id, environment.getPrefix());
-        Boolean isHealthy = isDataNodeHealthy(grpcUrl, tmUrl);
         return new DataNode()
+                .setId(id)
                 .setTmUrl(tmUrl)
                 .setGrpcUrl(grpcUrl)
                 .setEnvironment(environment)
-                .setHealthy(isHealthy);
+                .setHealthy(false);
     }
 
-    // TODO - we should have constructors that allow the user to override these defaults
+    /**
+     * Shutdown channels if they exist
+     */
+    private void shutdownChannels() {
+        try {
+            if (channel != null) {
+                channel.shutdownNow();
+                channel.awaitTermination(10L, TimeUnit.SECONDS);
+                channel = null;
+            }
+            if (coreChannel != null) {
+                coreChannel.shutdownNow();
+                coreChannel.awaitTermination(10L, TimeUnit.SECONDS);
+                coreChannel = null;
+            }
+            nodeId = 0;
+        } catch(InterruptedException e) {
+            log.error(e.getMessage(), e);
+        }
+    }
 
-    static {
-        int[] stagnet = {5, 6};
-        int[] fairground = {6, 7, 8, 9, 10, 11, 12};
-        Arrays.stream(stagnet).forEach(id -> dataNodes.add(dataNode(id, VegaEnvironment.STAGNET)));
-        Arrays.stream(fairground).forEach(id -> dataNodes.add(dataNode(id, VegaEnvironment.FAIRGROUND)));
+    /**
+     * Initialize channels
+     *
+     * @param dataNode {@link DataNode}
+     */
+    private void initializeChannels(
+            final DataNode dataNode
+    ) {
+        shutdownChannels();
+        nodeId = dataNode.getId();
+        channel = ManagedChannelBuilder.forAddress(dataNode.getGrpcUrl(), DEFAULT_DN_PORT).usePlaintext().build();
+        coreChannel = ManagedChannelBuilder.forAddress(dataNode.getGrpcUrl(), DEFAULT_CORE_PORT).usePlaintext().build();
+    }
+
+    /**
+     * Check if selected data node is healthy
+     *
+     * @return true / false
+     */
+    private boolean isSelectedNodeHealthy() {
+        if(nodeId > 0) {
+            return dataNodes.stream().anyMatch(dn -> dn.getId().equals(nodeId) &&
+                    dn.getEnvironment().equals(environment) &&
+                    dn.getHealthy());
+        }
+        return false;
     }
 
     /**
      * Periodically check if the date node is healthy
      */
-    private void checkDataNodeHealth() {
+    private void updateHealthStatus() {
         dataNodes.forEach(dn -> {
             var healthy = isDataNodeHealthy(dn.getGrpcUrl(), dn.getTmUrl());
             dn.setHealthy(healthy);
         });
+        if(nodeId == 0 || !isSelectedNodeHealthy()) {
+            Optional<DataNode> dn = getHealthyDataNode();
+            if(dn.isPresent()) {
+                initializeChannels(dn.get());
+            } else {
+                shutdownChannels();
+            }
+        }
     }
 
     /**
@@ -169,23 +254,6 @@ public class VegaGrpcClient {
         var nodes = dataNodes.stream().filter(DataNode::getHealthy).collect(Collectors.toList());
         Collections.shuffle(nodes);
         return nodes.stream().findFirst();
-    }
-
-    /**
-     * Create an instance of the {@link VegaGrpcClient}
-     *
-     * @param wallet {@link Wallet}
-     */
-    public VegaGrpcClient(
-            final Wallet wallet
-    ) {
-        this.wallet = wallet;
-        String hostname = dataNodes.stream().filter(DataNode::getHealthy).map(DataNode::getGrpcUrl).findFirst()
-                .orElseThrow(() -> new VegaGrpcClientException(ErrorCode.CANNOT_FIND_HEALTHY_DATA_NODE));
-        channel = ManagedChannelBuilder.forAddress(hostname, DEFAULT_DN_PORT).usePlaintext().build();
-        coreChannel = ManagedChannelBuilder.forAddress(hostname, DEFAULT_CORE_PORT).usePlaintext().build();
-        scheduler.scheduleAtFixedRate(this::computeProofOfWork, 0, 1, TimeUnit.SECONDS);
-        scheduler.scheduleAtFixedRate(this::checkDataNodeHealth, 0, 10, TimeUnit.SECONDS);
     }
 
     /**
@@ -721,7 +789,8 @@ public class VegaGrpcClient {
             builder = builder.setMarketId(marketId);
         }
         var request = builder.build();
-        var positions = getClient().listPositions(request).getPositions().getEdgesList();
+        var resp = getClient().listPositions(request);
+        var positions = resp.getPositions().getEdgesList();
         return positions.stream().map(TradingData.PositionEdge::getNode).collect(Collectors.toList());
     }
 

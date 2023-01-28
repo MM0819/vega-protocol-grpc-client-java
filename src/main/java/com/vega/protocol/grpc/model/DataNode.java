@@ -7,6 +7,7 @@ import lombok.experimental.Accessors;
 @Data
 @Accessors(chain = true)
 public class DataNode {
+    private Integer id;
     private String grpcUrl;
     private String tmUrl;
     private Boolean healthy;
