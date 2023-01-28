@@ -146,8 +146,6 @@ public class VegaGrpcClient {
             if(!isHealthy) {
                 log.warn("Unhealthy data node {}: Time diff (core) = {}; Time diff (DN) = {}; replaying = {}; " +
                         "height diff = {}", tmUrl, timeDiffCore, timeDiffDN, syncInfo.getReplaying(), heightDiff);
-            } else {
-                log.info("{} = healthy!", grpcUrl);
             }
             return isHealthy;
         } catch(Exception e) {
@@ -232,8 +230,10 @@ public class VegaGrpcClient {
      */
     private void updateHealthStatus() {
         dataNodes.forEach(dn -> {
-            var healthy = isDataNodeHealthy(dn.getGrpcUrl(), dn.getTmUrl());
-            dn.setHealthy(healthy);
+            if(dn.getEnvironment().equals(environment)) {
+                var healthy = isDataNodeHealthy(dn.getGrpcUrl(), dn.getTmUrl());
+                dn.setHealthy(healthy);
+            }
         });
         if(nodeId == 0 || !isSelectedNodeHealthy()) {
             Optional<DataNode> dn = getHealthyDataNode();
@@ -251,7 +251,8 @@ public class VegaGrpcClient {
      * @return {@link DataNode}
      */
     public Optional<DataNode> getHealthyDataNode() {
-        var nodes = dataNodes.stream().filter(DataNode::getHealthy).collect(Collectors.toList());
+        var nodes = dataNodes.stream().filter(dn -> dn.getHealthy() &&
+                dn.getEnvironment().equals(environment)).collect(Collectors.toList());
         Collections.shuffle(nodes);
         return nodes.stream().findFirst();
     }
