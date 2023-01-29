@@ -320,9 +320,11 @@ public class VegaGrpcClient {
      */
     private void taintProofOfWork(long blockHeight, final String txId) {
         List<ProofOfWork> powList = powByBlock.get(blockHeight);
-        for(ProofOfWork pow : powList) {
-            if(pow.getTxId().equals(txId)) {
-                pow.setUsed(true);
+        if(powList != null) {
+            for (ProofOfWork pow : powList) {
+                if (pow.getTxId().equals(txId)) {
+                    pow.setUsed(true);
+                }
             }
         }
     }
