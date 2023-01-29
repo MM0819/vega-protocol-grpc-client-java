@@ -720,7 +720,7 @@ public class VegaGrpcClient {
         if(!StringUtils.isEmpty(partyId)) {
             builder = builder.setPartyId(partyId);
         }
-        if(StringUtils.isEmpty(marketId)) {
+        if(!StringUtils.isEmpty(marketId)) {
             builder = builder.setMarketId(marketId);
         }
         var request = builder.build();
@@ -787,7 +787,7 @@ public class VegaGrpcClient {
         if(!StringUtils.isEmpty(partyId)) {
             builder = builder.setPartyId(partyId);
         }
-        if(StringUtils.isEmpty(marketId)) {
+        if(!StringUtils.isEmpty(marketId)) {
             builder = builder.setMarketId(marketId);
         }
         var request = builder.build();
