@@ -539,11 +539,39 @@ public class VegaGrpcClient {
             final String marketId,
             final String publicKey
     ) {
+        return submitOrder(price, size, side, timeInForce, 0, type, marketId, publicKey);
+    }
+
+    /**
+     * Submit an order
+     *
+     * @param price the order price
+     * @param size the order size
+     * @param side {@link vega.Vega.Side}
+     * @param timeInForce {@link vega.Vega.Order.TimeInForce}
+     * @param expiresAt expiry time for GTT orders
+     * @param type {@link vega.Vega.Order.Type}
+     * @param marketId the market ID
+     * @param publicKey the signing key
+     *
+     * @return {@link Optional<Core.SubmitTransactionResponse>}
+     */
+    public Optional<Core.SubmitTransactionResponse> submitOrder(
+            final String price,
+            final long size,
+            final Vega.Side side,
+            final Vega.Order.TimeInForce timeInForce,
+            final long expiresAt,
+            final Vega.Order.Type type,
+            final String marketId,
+            final String publicKey
+    ) {
         var orderSubmission = Commands.OrderSubmission.newBuilder()
                 .setPrice(price)
                 .setSize(size)
                 .setSide(side)
                 .setTimeInForce(timeInForce)
+                .setExpiresAt(expiresAt)
                 .setMarketId(marketId)
                 .setType(type)
                 .build();
